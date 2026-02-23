@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -289,6 +291,18 @@ func runTrailCreate(w, errW io.Writer, title, description, base, branch, statusS
 	}
 
 	fmt.Fprintf(w, "Created trail %q for branch %s (ID: %s)\n", title, branch, trailID)
+
+	// Push the branch and trail data to origin
+	if needsCreation {
+		if err := pushBranchToOrigin(branch); err != nil {
+			fmt.Fprintf(errW, "Warning: failed to push branch: %v\n", err)
+		} else {
+			fmt.Fprintf(w, "Pushed branch %s to origin\n", branch)
+		}
+	}
+	if err := strategy.PushTrailsBranch("origin"); err != nil {
+		fmt.Fprintf(errW, "Warning: failed to push trail data: %v\n", err)
+	}
 
 	// Checkout the branch if requested or prompted
 	if needsCreation && currentBranch != branch {
@@ -645,6 +659,17 @@ func createBranch(repo *git.Repository, branchName string) error {
 	ref := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), head.Hash())
 	if err := repo.Storer.SetReference(ref); err != nil {
 		return fmt.Errorf("failed to create branch ref: %w", err)
+	}
+	return nil
+}
+
+// pushBranchToOrigin pushes a branch to the origin remote.
+func pushBranchToOrigin(branchName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "push", "--no-verify", "-u", "origin", branchName)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
