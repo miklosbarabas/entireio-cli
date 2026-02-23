@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"context"
 	"io"
 )
 
@@ -167,6 +168,17 @@ type TokenCalculator interface {
 
 	// CalculateTokenUsage computes token usage from the transcript starting at the given offset.
 	CalculateTokenUsage(sessionRef string, fromOffset int) (*TokenUsage, error)
+}
+
+// TextGenerator is an optional interface for agents whose CLI supports
+// non-interactive text generation (e.g., claude --print).
+// Used for AI-powered metadata generation (trail titles, summaries).
+type TextGenerator interface {
+	Agent
+
+	// GenerateText sends a prompt to the agent's CLI and returns the raw text response.
+	// model is a hint (e.g., "haiku", "sonnet"). Implementations may ignore if not applicable.
+	GenerateText(ctx context.Context, prompt string, model string) (string, error)
 }
 
 // SubagentAwareExtractor provides methods for extracting files and tokens including subagents.
