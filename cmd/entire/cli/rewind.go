@@ -669,7 +669,7 @@ func restoreSessionTranscript(transcriptFile, sessionID string, agent agentpkg.A
 // Returns the session ID that was actually used (may differ from input if checkpoint provides one).
 func restoreSessionTranscriptFromStrategy(cpID id.CheckpointID, sessionID string, agent agentpkg.Agent) (string, error) {
 	// Get transcript content from checkpoint storage
-	content, returnedSessionID, exportData, err := checkpoint.LookupSessionLog(cpID)
+	content, returnedSessionID, err := checkpoint.LookupSessionLog(cpID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get session log: %w", err)
 	}
@@ -680,13 +680,23 @@ func restoreSessionTranscriptFromStrategy(cpID id.CheckpointID, sessionID string
 		sessionID = returnedSessionID
 	}
 
-	// If export data is available (e.g., OpenCode), use WriteSession which handles
-	// both file writing and native storage import (SQLite for OpenCode).
-	if len(exportData) > 0 {
-		return writeSessionWithExportData(content, exportData, sessionID, agent)
+	sessionFile, err := resolveTranscriptPath(sessionID, agent)
+	if err != nil {
+		return "", err
 	}
-
-	return writeTranscriptToAgentSession(content, sessionID, agent)
+	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o750); err != nil {
+		return "", fmt.Errorf("failed to create agent session directory: %w", err)
+	}
+	agentSession := &agentpkg.AgentSession{
+		SessionID:  sessionID,
+		AgentName:  agent.Name(),
+		SessionRef: sessionFile,
+		NativeData: content,
+	}
+	if err := agent.WriteSession(agentSession); err != nil {
+		return "", fmt.Errorf("failed to write session: %w", err)
+	}
+	return sessionID, nil
 }
 
 // restoreSessionTranscriptFromShadow restores a session transcript from a shadow branch commit.
@@ -711,22 +721,6 @@ func restoreSessionTranscriptFromShadow(commitHash, metadataDir, sessionID strin
 		return "", fmt.Errorf("failed to get transcript from shadow branch: %w", err)
 	}
 
-	// Read export data from shadow branch tree if available (e.g., OpenCode export JSON).
-	exportData := store.GetExportDataFromCommit(hash, metadataDir)
-
-	// If export data is available (e.g., OpenCode), use WriteSession which handles
-	// both file writing and native storage import (SQLite for OpenCode).
-	if len(exportData) > 0 {
-		return writeSessionWithExportData(content, exportData, sessionID, agent)
-	}
-
-	return writeTranscriptToAgentSession(content, sessionID, agent)
-}
-
-// writeSessionWithExportData writes session content using the agent's WriteSession method,
-// which handles both file writing and native storage import (e.g., SQLite for OpenCode).
-// Used when export data is available for agents with non-file-based storage.
-func writeSessionWithExportData(content, exportData []byte, sessionID string, agent agentpkg.Agent) (string, error) {
 	sessionFile, err := resolveTranscriptPath(sessionID, agent)
 	if err != nil {
 		return "", err
@@ -739,31 +733,10 @@ func writeSessionWithExportData(content, exportData []byte, sessionID string, ag
 		AgentName:  agent.Name(),
 		SessionRef: sessionFile,
 		NativeData: content,
-		ExportData: exportData,
 	}
 	if err := agent.WriteSession(agentSession); err != nil {
 		return "", fmt.Errorf("failed to write session: %w", err)
 	}
-	return sessionID, nil
-}
-
-// writeTranscriptToAgentSession writes transcript content to the agent's session storage.
-func writeTranscriptToAgentSession(content []byte, sessionID string, agent agentpkg.Agent) (string, error) {
-	sessionFile, err := resolveTranscriptPath(sessionID, agent)
-	if err != nil {
-		return "", err
-	}
-
-	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o750); err != nil {
-		return "", fmt.Errorf("failed to create agent session directory: %w", err)
-	}
-
-	fmt.Fprintf(os.Stderr, "Writing transcript to: %s\n", sessionFile)
-	if err := os.WriteFile(sessionFile, content, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write transcript: %w", err)
-	}
-
 	return sessionID, nil
 }
 
@@ -1179,6 +1152,9 @@ func countCommitsBetween(repo *git.Repository, ancestor, descendant plumbing.Has
 // Uses the git CLI instead of go-git because go-git's HardReset incorrectly
 // deletes untracked directories (like .entire/) even when they're in .gitignore.
 func performGitResetHard(commitHash string) error {
+	if strings.HasPrefix(commitHash, "-") {
+		return fmt.Errorf("reset failed: invalid commit hash %q", commitHash)
+	}
 	ctx := context.Background()
 	cmd := exec.CommandContext(ctx, "git", "reset", "--hard", commitHash)
 	if output, err := cmd.CombinedOutput(); err != nil {

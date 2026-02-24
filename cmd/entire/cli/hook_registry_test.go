@@ -60,6 +60,12 @@ func TestNewAgentHookVerbCmd_LogsInvocation(t *testing.T) {
 		t.Fatalf("failed to create .entire directory: %v", err)
 	}
 
+	// Create settings.json to indicate Entire is set up in this repo
+	settingsFile := filepath.Join(entireDir, "settings.json")
+	if err := os.WriteFile(settingsFile, []byte(`{"enabled":true,"strategy":"manual-commit"}`), 0o644); err != nil {
+		t.Fatalf("failed to create settings file: %v", err)
+	}
+
 	// Create logs directory
 	logsDir := filepath.Join(entireDir, "logs")
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {

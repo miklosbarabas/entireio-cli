@@ -3,32 +3,18 @@
 // Do not edit manually — changes will be overwritten on next install.
 // Requires Bun runtime (used by OpenCode's plugin system for loading ESM plugins).
 import type { Plugin } from "@opencode-ai/plugin"
-import { tmpdir } from "node:os"
 
-export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
+export const EntirePlugin: Plugin = async ({ $, directory }) => {
   const ENTIRE_CMD = "__ENTIRE_CMD__"
-  // Store transcripts in a temp directory — these are ephemeral handoff files
-  // between the plugin and the Go hook handler. Once checkpointed, the data
-  // lives on git refs and the file is disposable.
-  const sanitized = directory.replace(/[^a-zA-Z0-9]/g, "-")
-  const transcriptDir = `${tmpdir()}/entire-opencode/${sanitized}`
+  // Track seen user messages to fire turn-start only once per message
   const seenUserMessages = new Set<string>()
-
-  // In-memory stores — used to write transcripts without relying on the SDK API,
-  // which may be unavailable during shutdown.
-  // messageStore: keyed by message ID, stores message metadata (role, time, tokens, etc.)
-  const messageStore = new Map<string, any>()
-  // partStore: keyed by message ID, stores accumulated parts from message.part.updated events
-  const partStore = new Map<string, any[]>()
+  // Track current session ID for message events (which don't include sessionID)
   let currentSessionID: string | null = null
-  // Full session info from session.created — needed for OpenCode export format on resume/rewind
-  let currentSessionInfo: any = null
-
-  // Ensure transcript directory exists
-  await $`mkdir -p ${transcriptDir}`.quiet().nothrow()
+  // In-memory store for message metadata (role, tokens, etc.)
+  const messageStore = new Map<string, any>()
 
   /**
-   * Pipe JSON payload to an entire hooks command.
+   * Pipe JSON payload to an entire hooks command (async).
    * Errors are logged but never thrown — plugin failures must not crash OpenCode.
    */
   async function callHook(hookName: string, payload: Record<string, unknown>) {
@@ -40,116 +26,24 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
     }
   }
 
-  /** Extract text content from a list of parts. */
-  function textFromParts(parts: any[]): string {
-    return parts
-      .filter((p: any) => p.type === "text")
-      .map((p: any) => p.text ?? "")
-      .join("\n")
-  }
-
-  /** Format a message object from its accumulated parts. */
-  function formatMessageFromStore(msg: any) {
-    const parts = partStore.get(msg.id) ?? []
-    return {
-      id: msg.id,
-      role: msg.role,
-      content: textFromParts(parts),
-      time: msg.time,
-      ...(msg.role === "assistant" ? {
-        tokens: msg.tokens,
-        cost: msg.cost,
-        parts: parts.map((p: any) => ({
-          type: p.type,
-          ...(p.type === "text" ? { text: p.text } : {}),
-          ...(p.type === "tool" ? { tool: p.tool, callID: p.callID, state: p.state } : {}),
-        })),
-      } : {}),
-    }
-  }
-
-  /** Format a message from an API response (which includes parts inline). */
-  function formatMessageFromAPI(info: any, parts: any[]) {
-    return {
-      id: info.id,
-      role: info.role,
-      content: textFromParts(parts),
-      time: info.time,
-      ...(info.role === "assistant" ? {
-        tokens: info.tokens,
-        cost: info.cost,
-        parts: parts.map((p: any) => ({
-          type: p.type,
-          ...(p.type === "text" ? { text: p.text } : {}),
-          ...(p.type === "tool" ? { tool: p.tool, callID: p.callID, state: p.state } : {}),
-        })),
-      } : {}),
-    }
-  }
-
   /**
-   * Write transcript as JSONL (one message per line) from in-memory stores.
-   * This does NOT call the SDK API, so it works even during shutdown.
+   * Synchronous variant for hooks that fire near process exit (turn-end, session-end).
+   * `opencode run` breaks its event loop on the same session.status idle event that
+   * triggers turn-end. The async callHook would be killed before completing.
+   * Bun.spawnSync blocks the event loop, preventing exit until the hook finishes.
    */
-  async function writeTranscriptFromMemory(sessionID: string): Promise<string> {
-    const transcriptPath = `${transcriptDir}/${sessionID}.jsonl`
+  function callHookSync(hookName: string, payload: Record<string, unknown>) {
     try {
-      const messages = Array.from(messageStore.values())
-        .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))
-
-      const lines = messages.map(msg => JSON.stringify(formatMessageFromStore(msg)))
-      await Bun.write(transcriptPath, lines.join("\n") + "\n")
-    } catch {
-      // Silently ignore write failures
-    }
-    return transcriptPath
-  }
-
-  /**
-   * Try to fetch messages via the SDK API (returns messages with parts inline)
-   * and write transcript as JSONL. Falls back to in-memory stores if the API is unavailable.
-   */
-  async function writeTranscriptWithFallback(sessionID: string): Promise<string> {
-    const transcriptPath = `${transcriptDir}/${sessionID}.jsonl`
-    try {
-      const response = await client.session.message.list({ path: { id: sessionID } })
-      // API returns Array<{ info: Message, parts: Array<Part> }>
-      const items = response.data ?? []
-
-      const lines = items.map((item: any) =>
-        JSON.stringify(formatMessageFromAPI(item.info, item.parts ?? []))
-      )
-      await Bun.write(transcriptPath, lines.join("\n") + "\n")
-      return transcriptPath
-    } catch {
-      // API unavailable (likely shutting down) — fall back to in-memory stores
-      return writeTranscriptFromMemory(sessionID)
-    }
-  }
-
-  /**
-   * Write session in OpenCode's native export format (JSON).
-   * This file is used by `opencode import` during resume/rewind to restore
-   * the session into OpenCode's SQLite database with the original session ID.
-   */
-  async function writeExportJSON(sessionID: string): Promise<string> {
-    const exportPath = `${transcriptDir}/${sessionID}.export.json`
-    try {
-      const messages = Array.from(messageStore.values())
-        .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))
-
-      const exportData = {
-        info: currentSessionInfo ?? { id: sessionID },
-        messages: messages.map(msg => ({
-          info: msg,
-          parts: (partStore.get(msg.id) ?? []),
-        })),
-      }
-      await Bun.write(exportPath, JSON.stringify(exportData))
+      const json = JSON.stringify(payload)
+      Bun.spawnSync(["sh", "-c", `${ENTIRE_CMD} hooks opencode ${hookName}`], {
+        cwd: directory,
+        stdin: new TextEncoder().encode(json + "\n"),
+        stdout: "ignore",
+        stderr: "ignore",
+      })
     } catch {
       // Silently ignore — plugin failures must not crash OpenCode
     }
-    return exportPath
   }
 
   return {
@@ -158,11 +52,14 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
         case "session.created": {
           const session = (event as any).properties?.info
           if (!session?.id) break
+          // Reset per-session tracking state when switching sessions.
+          if (currentSessionID !== session.id) {
+            seenUserMessages.clear()
+            messageStore.clear()
+          }
           currentSessionID = session.id
-          currentSessionInfo = session
           await callHook("session-start", {
             session_id: session.id,
-            transcript_path: `${transcriptDir}/${session.id}.jsonl`,
           })
           break
         }
@@ -171,7 +68,6 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
           const msg = (event as any).properties?.info
           if (!msg) break
           // Store message metadata (role, time, tokens, etc.)
-          // Content is NOT on the message — it arrives via message.part.updated events.
           messageStore.set(msg.id, msg)
           break
         }
@@ -179,17 +75,6 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
         case "message.part.updated": {
           const part = (event as any).properties?.part
           if (!part?.messageID) break
-
-          // Accumulate parts per message
-          const existing = partStore.get(part.messageID) ?? []
-          // Replace existing part with same id, or append new one
-          const idx = existing.findIndex((p: any) => p.id === part.id)
-          if (idx >= 0) {
-            existing[idx] = part
-          } else {
-            existing.push(part)
-          }
-          partStore.set(part.messageID, existing)
 
           // Fire turn-start on the first text part of a new user message
           const msg = messageStore.get(part.messageID)
@@ -199,7 +84,6 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
             if (sessionID) {
               await callHook("turn-start", {
                 session_id: sessionID,
-                transcript_path: `${transcriptDir}/${sessionID}.jsonl`,
                 prompt: part.text ?? "",
               })
             }
@@ -207,14 +91,17 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
           break
         }
 
-        case "session.idle": {
-          const sessionID = (event as any).properties?.sessionID
+        case "session.status": {
+          // session.status fires in both TUI and non-interactive (run) mode.
+          // session.idle is deprecated and not reliably emitted in run mode.
+          const props = (event as any).properties
+          if (props?.status?.type !== "idle") break
+          const sessionID = props?.sessionID
           if (!sessionID) break
-          const transcriptPath = await writeTranscriptWithFallback(sessionID)
-          await writeExportJSON(sessionID)
-          await callHook("turn-end", {
+          // Use sync variant: `opencode run` exits on the same idle event,
+          // so an async hook would be killed before completing.
+          callHookSync("turn-end", {
             session_id: sessionID,
-            transcript_path: transcriptPath,
           })
           break
         }
@@ -224,7 +111,6 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
           if (!sessionID) break
           await callHook("compaction", {
             session_id: sessionID,
-            transcript_path: `${transcriptDir}/${sessionID}.jsonl`,
           })
           break
         }
@@ -232,19 +118,12 @@ export const EntirePlugin: Plugin = async ({ client, directory, $ }) => {
         case "session.deleted": {
           const session = (event as any).properties?.info
           if (!session?.id) break
-          // Write final transcript + export JSON before signaling session end
-          if (messageStore.size > 0) {
-            await writeTranscriptFromMemory(session.id)
-            await writeExportJSON(session.id)
-          }
           seenUserMessages.clear()
           messageStore.clear()
-          partStore.clear()
           currentSessionID = null
-          currentSessionInfo = null
-          await callHook("session-end", {
+          // Use sync variant: session-end may fire during shutdown.
+          callHookSync("session-end", {
             session_id: session.id,
-            transcript_path: `${transcriptDir}/${session.id}.jsonl`,
           })
           break
         }

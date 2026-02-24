@@ -97,91 +97,27 @@ git diff --cached --name-only -z --diff-filter=ACM | grep -z '\\.go$' | xargs -0
 
 [tasks.bench]
 description = "Run all benchmarks"
-run = "go test -bench=. -benchmem -run='^$' -timeout=10m ./..."
-
-[tasks."bench:cpu"]
-description = "Run benchmarks with CPU profile (single package)"
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-PKG="${BENCH_PKG:-./cmd/entire/cli/benchutil/}"
-echo "Profiling package: $PKG (override with BENCH_PKG=./path/to/pkg)"
-go test -bench=. -benchmem -run='^$' -cpuprofile=cpu.prof -timeout=10m "$PKG"
-echo "Profile saved to cpu.prof. View with: go tool pprof -http=:8080 cpu.prof"
-"""
-
-[tasks."bench:mem"]
-description = "Run benchmarks with memory profile (single package)"
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-PKG="${BENCH_PKG:-./cmd/entire/cli/benchutil/}"
-echo "Profiling package: $PKG (override with BENCH_PKG=./path/to/pkg)"
-go test -bench=. -benchmem -run='^$' -memprofile=mem.prof -timeout=10m "$PKG"
-echo "Profile saved to mem.prof. View with: go tool pprof -http=:8080 mem.prof"
-"""
-
-[tasks."bench:compare"]
-description = "Compare benchmarks between current branch and main"
-run = """
+run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install benchstat if not available
-if ! command -v benchstat &>/dev/null; then
-  echo "Installing benchstat..."
-  if ! go install golang.org/x/perf/cmd/benchstat@latest; then
-    echo "Failed to install benchstat. Please install it manually: go install golang.org/x/perf/cmd/benchstat@latest"
-    exit 1
-  fi
+output=$(go test -bench=. -benchmem -run='^$' -timeout=10m ./... 2>&1)
+
+# Print non-benchmark lines (ok, PASS, etc.) to stderr
+echo "$output" | grep -v '^Benchmark' >&2
+
+# Format benchmark lines as a table with headers using column
+bench_lines=$(echo "$output" | grep '^Benchmark' || true)
+if [ -n "$bench_lines" ]; then
+  {
+    echo "BENCHMARK ITERS MS/OP NS/OP B/OP ALLOCS/OP"
+    echo "--------- ----- ----- ----- ---- ---------"
+    # Strip unit suffixes and add ms/op column (ns/op / 1000000)
+    echo "$bench_lines" | sed 's/ ns\/op//g; s/ B\/op//g; s/ allocs\/op//g; s/ transcript_bytes//g' \
+      | awk '{printf "%s %s %.2f %s %s %s\n", $1, $2, $3/1000000, $3, $4, $5}'
+  } | column -t
 fi
-
-BENCH_PATTERN="${BENCH_PATTERN:-.}"
-BENCH_COUNT="${BENCH_COUNT:-6}"
-BENCH_TIMEOUT="${BENCH_TIMEOUT:-10m}"
-BASE_REF="${BASE_REF:-main}"
-
-current_branch=$(git rev-parse --abbrev-ref HEAD)
-if [ "$current_branch" = "$BASE_REF" ]; then
-  echo "Already on $BASE_REF — nothing to compare. Run from a feature branch."
-  exit 1
-fi
-
-tmpdir=$(mktemp -d)
-new_out="$tmpdir/new.txt"
-old_out="$tmpdir/old.txt"
-
-has_changes=false
-trap 'git checkout "$current_branch" --quiet 2>/dev/null; [ "$has_changes" = true ] && git stash pop --quiet 2>/dev/null; rm -rf "$tmpdir"' EXIT
-
-echo "=== Benchmarking current branch ($current_branch) ==="
-go test -bench="$BENCH_PATTERN" -benchmem -run='^$' -count="$BENCH_COUNT" -timeout="$BENCH_TIMEOUT" ./... > "$new_out" 2>&1 || true
-
-# Check for uncommitted changes
-has_changes=false
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  has_changes=true
-  echo "Stashing uncommitted changes..."
-  git stash push -m "bench:compare auto-stash"
-fi
-
-echo ""
-echo "=== Benchmarking base ($BASE_REF) ==="
-git checkout "$BASE_REF" --quiet
-go test -bench="$BENCH_PATTERN" -benchmem -run='^$' -count="$BENCH_COUNT" -timeout="$BENCH_TIMEOUT" ./... > "$old_out" 2>&1 || true
-
-echo ""
-echo "=== Switching back to $current_branch ==="
-git checkout "$current_branch" --quiet
-if [ "$has_changes" = true ]; then
-  git stash pop --quiet
-fi
-
-echo ""
-echo "=== Results (base=$BASE_REF vs current=$current_branch) ==="
-echo ""
-benchstat "$old_out" "$new_out"
-"""
+'''
 
 [tasks."test:e2e"]
 description = "Run E2E tests with real agent calls (requires claude CLI)"
@@ -195,3 +131,7 @@ run = "E2E_AGENT=claude-code go test -tags=e2e -count=1 -timeout=30m -v ./cmd/en
 [tasks."test:e2e:gemini"]
 description = "Run E2E tests with Gemini CLI (sequential to avoid rate limits)"
 run = "E2E_AGENT=gemini go test -tags=e2e -count=1 -parallel 1 -timeout=30m -v ./cmd/entire/cli/e2e_test/..."
+
+[tasks."test:e2e:opencode"]
+description = "Run E2E tests with OpenCode"
+run = "E2E_AGENT=opencode go test -tags=e2e -count=1 -timeout=30m -v ./cmd/entire/cli/e2e_test/..."

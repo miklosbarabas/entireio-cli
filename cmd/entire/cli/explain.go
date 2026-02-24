@@ -13,6 +13,7 @@ import (
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/geminicli"
+	"github.com/entireio/cli/cmd/entire/cli/agent/opencode"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
@@ -535,8 +536,18 @@ func getAssociatedCommits(repo *git.Repository, checkpointID id.CheckpointID, se
 func scopeTranscriptForCheckpoint(fullTranscript []byte, startOffset int, agentType agent.AgentType) []byte {
 	switch agentType {
 	case agent.AgentTypeGemini:
-		return geminicli.SliceFromMessage(fullTranscript, startOffset)
-	case agent.AgentTypeClaudeCode, agent.AgentTypeOpenCode, agent.AgentTypeUnknown:
+		scoped, err := geminicli.SliceFromMessage(fullTranscript, startOffset)
+		if err != nil {
+			return nil
+		}
+		return scoped
+	case agent.AgentTypeOpenCode:
+		scoped, err := opencode.SliceFromMessage(fullTranscript, startOffset)
+		if err != nil {
+			return nil
+		}
+		return scoped
+	case agent.AgentTypeClaudeCode, agent.AgentTypeUnknown:
 		return transcript.SliceFromLine(fullTranscript, startOffset)
 	}
 	return transcript.SliceFromLine(fullTranscript, startOffset)

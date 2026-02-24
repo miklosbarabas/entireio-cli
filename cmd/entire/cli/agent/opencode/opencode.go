@@ -2,14 +2,18 @@
 package opencode
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
 
@@ -51,6 +55,8 @@ func (a *OpenCodeAgent) DetectPresence() (bool, error) {
 
 // --- Transcript Storage ---
 
+// ReadTranscript reads the transcript for a session.
+// The sessionRef is expected to be a path to the export JSON file.
 func (a *OpenCodeAgent) ReadTranscript(sessionRef string) ([]byte, error) {
 	data, err := os.ReadFile(sessionRef) //nolint:gosec // Path from agent hook
 	if err != nil {
@@ -59,18 +65,96 @@ func (a *OpenCodeAgent) ReadTranscript(sessionRef string) ([]byte, error) {
 	return data, nil
 }
 
+// ChunkTranscript splits an OpenCode export JSON transcript by distributing messages across chunks.
+// OpenCode uses JSON format with {"info": {...}, "messages": [...]} structure.
 func (a *OpenCodeAgent) ChunkTranscript(content []byte, maxSize int) ([][]byte, error) {
-	// OpenCode uses JSONL (one message per line) — use the shared JSONL chunker.
-	chunks, err := agent.ChunkJSONL(content, maxSize)
-	if err != nil {
-		return nil, fmt.Errorf("failed to chunk opencode transcript: %w", err)
+	var session ExportSession
+	if err := json.Unmarshal(content, &session); err != nil {
+		return nil, fmt.Errorf("failed to parse export session for chunking: %w", err)
 	}
+
+	if len(session.Messages) == 0 {
+		return [][]byte{content}, nil
+	}
+
+	// Marshal info to calculate accurate base size
+	infoBytes, err := json.Marshal(session.Info)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal session info for chunking: %w", err)
+	}
+	// Base JSON structure size: {"info":<info>,"messages":[ ... ]}
+	baseSize := len(`{"info":`) + len(infoBytes) + len(`,"messages":[]}`)
+
+	var chunks [][]byte
+	var currentMessages []ExportMessage
+	currentSize := baseSize
+
+	for _, msg := range session.Messages {
+		// Marshal message to get its size
+		msgBytes, err := json.Marshal(msg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal message for chunking: %w", err)
+		}
+		msgSize := len(msgBytes) + 1 // +1 for comma separator
+
+		if currentSize+msgSize > maxSize && len(currentMessages) > 0 {
+			// Save current chunk
+			chunkData, err := json.Marshal(ExportSession{Info: session.Info, Messages: currentMessages})
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal chunk: %w", err)
+			}
+			chunks = append(chunks, chunkData)
+
+			// Start new chunk
+			currentMessages = nil
+			currentSize = baseSize
+		}
+
+		currentMessages = append(currentMessages, msg)
+		currentSize += msgSize
+	}
+
+	// Add the last chunk
+	if len(currentMessages) > 0 {
+		chunkData, err := json.Marshal(ExportSession{Info: session.Info, Messages: currentMessages})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal final chunk: %w", err)
+		}
+		chunks = append(chunks, chunkData)
+	}
+
+	if len(chunks) == 0 {
+		return nil, errors.New("failed to create any chunks")
+	}
+
 	return chunks, nil
 }
 
+// ReassembleTranscript merges OpenCode export JSON chunks by combining their message arrays.
 func (a *OpenCodeAgent) ReassembleTranscript(chunks [][]byte) ([]byte, error) {
-	// JSONL reassembly is simple concatenation.
-	return agent.ReassembleJSONL(chunks), nil
+	if len(chunks) == 0 {
+		return nil, errors.New("no chunks to reassemble")
+	}
+
+	var allMessages []ExportMessage
+	var sessionInfo SessionInfo
+
+	for i, chunk := range chunks {
+		var session ExportSession
+		if err := json.Unmarshal(chunk, &session); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal chunk %d: %w", i, err)
+		}
+		if i == 0 {
+			sessionInfo = session.Info // Preserve session info from first chunk
+		}
+		allMessages = append(allMessages, session.Messages...)
+	}
+
+	result, err := json.Marshal(ExportSession{Info: sessionInfo, Messages: allMessages})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal reassembled transcript: %w", err)
+	}
+	return result, nil
 }
 
 // --- Legacy methods ---
@@ -95,7 +179,7 @@ func (a *OpenCodeAgent) GetSessionDir(repoPath string) (string, error) {
 }
 
 func (a *OpenCodeAgent) ResolveSessionFile(sessionDir, agentSessionID string) string {
-	return filepath.Join(sessionDir, agentSessionID+".jsonl")
+	return filepath.Join(sessionDir, agentSessionID+".json")
 }
 
 func (a *OpenCodeAgent) ReadSession(input *agent.HookInput) (*agent.AgentSession, error) {
@@ -111,6 +195,10 @@ func (a *OpenCodeAgent) ReadSession(input *agent.HookInput) (*agent.AgentSession
 	modifiedFiles, err := ExtractModifiedFiles(data)
 	if err != nil {
 		// Non-fatal: we can still return the session without modified files
+		logging.Warn(context.Background(), "failed to extract modified files from opencode session",
+			slog.String("session_ref", input.SessionRef),
+			slog.String("error", err.Error()),
+		)
 		modifiedFiles = nil
 	}
 
@@ -127,36 +215,13 @@ func (a *OpenCodeAgent) WriteSession(session *agent.AgentSession) error {
 	if session == nil {
 		return errors.New("nil session")
 	}
-	if session.SessionRef == "" {
-		return errors.New("no session ref to write to")
-	}
 	if len(session.NativeData) == 0 {
 		return errors.New("no session data to write")
 	}
 
-	// 1. Write JSONL file (for Entire's internal checkpoint use)
-	dir := filepath.Dir(session.SessionRef)
-	//nolint:gosec // G301: Session directory needs standard permissions
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("failed to create session directory: %w", err)
-	}
-	if err := os.WriteFile(session.SessionRef, session.NativeData, 0o600); err != nil {
-		return fmt.Errorf("failed to write session data: %w", err)
-	}
-
-	// 2. If we have export data, import the session into OpenCode.
-	//    This enables `opencode -s <id>` for both resume and rewind.
-	if len(session.ExportData) == 0 {
-		return nil // No export data — skip import (graceful degradation)
-	}
-
-	if err := a.importSessionIntoOpenCode(session.SessionID, session.ExportData); err != nil {
-		// Non-fatal: import is best-effort. The JSONL file is written,
-		// and the user can always run `opencode import <file>` manually.
-		fmt.Fprintf(os.Stderr, "warning: could not import session into OpenCode: %v\n", err)
-	}
-
-	return nil
+	// Import the session into OpenCode's database.
+	// This enables `opencode -s <id>` for both resume and rewind.
+	return a.importSessionIntoOpenCode(session.SessionID, session.NativeData)
 }
 
 // importSessionIntoOpenCode writes the export JSON to a temp file and runs
@@ -164,12 +229,17 @@ func (a *OpenCodeAgent) WriteSession(session *agent.AgentSession) error {
 // For rewind (session already exists), the session is deleted first so the
 // reimport replaces it with the checkpoint-state messages.
 func (a *OpenCodeAgent) importSessionIntoOpenCode(sessionID string, exportData []byte) error {
-	// Delete the session first so reimport replaces it cleanly.
+	// Delete existing session first so reimport replaces it cleanly.
 	// opencode import uses ON CONFLICT DO NOTHING, so existing messages
 	// would be skipped without this step (breaking rewind).
-	// runOpenCodeSessionDelete treats "not found" as success.
 	if err := runOpenCodeSessionDelete(sessionID); err != nil {
-		return fmt.Errorf("failed to delete existing session: %w", err)
+		// Non-fatal: session might not exist yet (first session).
+		// Import will still work for new sessions; only rewind of existing sessions
+		// would have stale messages.
+		logging.Warn(context.Background(), "could not delete existing opencode session",
+			slog.String("session_id", sessionID),
+			slog.String("error", err.Error()),
+		)
 	}
 
 	// Write export JSON to a temp file for opencode import

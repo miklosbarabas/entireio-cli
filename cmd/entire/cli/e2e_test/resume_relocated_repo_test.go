@@ -4,11 +4,16 @@ package e2e
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/entireio/cli/cmd/entire/cli/agent/claudecode"
+	"github.com/entireio/cli/cmd/entire/cli/agent"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode" // Register claude-code agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"  // Register gemini agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/opencode"   // Register opencode agent
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -54,13 +59,13 @@ func TestE2E_ResumeInRelocatedRepo(t *testing.T) {
 	require.NotEmpty(t, checkpointID, "Commit should have Entire-Checkpoint trailer")
 	t.Logf("Checkpoint ID: %s", checkpointID)
 
-	// Compute the expected session directories for original and new locations.
-	// Claude stores transcripts at ~/.claude/projects/<sanitized-repo-path>/
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	// Get the agent to compute session directories (agent-agnostic)
+	agentInstance, err := agent.Get(agent.AgentName(defaultAgent))
+	require.NoError(t, err, "should be able to get agent instance")
 
-	originalProjectDir := claudecode.SanitizePathForClaude(originalDir)
-	originalSessionDir := filepath.Join(home, ".claude", "projects", originalProjectDir)
+	// Compute the expected session directories for original and new locations.
+	originalSessionDir, err := agentInstance.GetSessionDir(originalDir)
+	require.NoError(t, err, "should compute original session dir")
 
 	// Step 5: Move the repository to a new location
 	t.Log("Step 5: Moving repository to new location")
@@ -77,12 +82,12 @@ func TestE2E_ResumeInRelocatedRepo(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "original location should not exist after move")
 	t.Logf("Moved repo to: %s", newDir)
 
-	newProjectDir := claudecode.SanitizePathForClaude(newDir)
-	newSessionDir := filepath.Join(home, ".claude", "projects", newProjectDir)
+	newSessionDir, err := agentInstance.GetSessionDir(newDir)
+	require.NoError(t, err, "should compute new session dir")
 
-	// Sanity check: the two project dirs must be different
-	require.NotEqual(t, originalProjectDir, newProjectDir,
-		"sanitized project dirs should differ for different repo paths")
+	// Sanity check: the two session dirs must be different
+	require.NotEqual(t, originalSessionDir, newSessionDir,
+		"session dirs should differ for different repo paths")
 	t.Logf("Original session dir: %s", originalSessionDir)
 	t.Logf("New session dir:      %s", newSessionDir)
 
@@ -103,33 +108,59 @@ func TestE2E_ResumeInRelocatedRepo(t *testing.T) {
 	output := newEnv.RunCLI("resume", "feature/e2e-test", "--force")
 	t.Logf("Resume output:\n%s", output)
 
-	// Step 8: Verify the transcript was written to the NEW session directory
+	// Step 8: Verify the session was restored at the new location
 	t.Log("Step 8: Verifying session was created at new location")
 
-	// The resume output should reference the new session dir, not the old one
-	assert.Contains(t, output, newProjectDir,
-		"resume output should reference the new project directory")
-	assert.NotContains(t, output, originalProjectDir,
-		"resume output should NOT reference the old project directory")
+	// The resume output should reference the new session dir path, not the old one.
+	newSessionDirBase := filepath.Base(newSessionDir)
+	originalSessionDirBase := filepath.Base(originalSessionDir)
+	assert.Contains(t, output, newSessionDirBase,
+		"resume output should reference the new session directory")
+	if newSessionDirBase != originalSessionDirBase {
+		assert.NotContains(t, output, originalSessionDirBase,
+			"resume output should NOT reference the old session directory")
+	}
 
-	// Verify the new session dir was actually created with files
-	newDirEntries, err := os.ReadDir(newSessionDir)
-	require.NoError(t, err, "new session directory should exist after resume")
-	require.NotEmpty(t, newDirEntries, "new session directory should contain files")
-	t.Logf("New session dir contains %d entries", len(newDirEntries))
+	// Verification differs by agent:
+	// - Claude Code: writes transcript files to session directory
+	// - OpenCode: imports session into its database (no files in session dir)
+	if defaultAgent == AgentNameOpenCode {
+		// For OpenCode, extract session ID from output and verify it exists in the database
+		// Output format: "Session: ses_xxxxx"
+		sessionIDRegex := regexp.MustCompile(`Session: (ses_[a-zA-Z0-9]+)`)
+		matches := sessionIDRegex.FindStringSubmatch(output)
+		require.NotEmpty(t, matches, "resume output should contain session ID")
+		sessionID := matches[1]
+		t.Logf("Extracted session ID: %s", sessionID)
 
-	// Verify at least one JSONL transcript file exists
-	hasTranscript := false
-	for _, entry := range newDirEntries {
-		if strings.HasSuffix(entry.Name(), ".jsonl") {
-			info, statErr := entry.Info()
-			if statErr == nil && info.Size() > 0 {
-				hasTranscript = true
-				t.Logf("Found transcript: %s (%d bytes)", entry.Name(), info.Size())
+		// Verify session exists in OpenCode's database via `opencode session list`
+		listCmd := exec.Command("opencode", "session", "list")
+		listCmd.Dir = newDir
+		listOutput, listErr := listCmd.CombinedOutput()
+		require.NoError(t, listErr, "opencode session list should succeed")
+		assert.Contains(t, string(listOutput), sessionID,
+			"session should exist in OpenCode's database after resume")
+		t.Logf("OpenCode session list output:\n%s", string(listOutput))
+	} else {
+		// For Claude Code and others, verify files in session directory
+		newDirEntries, err := os.ReadDir(newSessionDir)
+		require.NoError(t, err, "new session directory should exist after resume")
+		require.NotEmpty(t, newDirEntries, "new session directory should contain files")
+		t.Logf("New session dir contains %d entries", len(newDirEntries))
+
+		// Verify at least one transcript file exists
+		hasTranscript := false
+		for _, entry := range newDirEntries {
+			if strings.HasSuffix(entry.Name(), ".jsonl") || strings.HasSuffix(entry.Name(), ".json") {
+				info, statErr := entry.Info()
+				if statErr == nil && info.Size() > 0 {
+					hasTranscript = true
+					t.Logf("Found transcript: %s (%d bytes)", entry.Name(), info.Size())
+				}
 			}
 		}
+		assert.True(t, hasTranscript, "new session directory should contain a non-empty transcript file")
 	}
-	assert.True(t, hasTranscript, "new session directory should contain a non-empty JSONL transcript")
 
 	// Step 9: Verify the OLD session directory was NOT created by resume
 	// (It may exist from Step 1's agent run, so check that resume didn't write to it

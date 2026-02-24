@@ -558,9 +558,7 @@ func GetRemoteMetadataBranchTree(repo *git.Repository) (*object.Tree, error) {
 // The function first uses 'git rev-parse --show-toplevel' to find the repository
 // root, which works correctly even when called from a subdirectory within the repo.
 func OpenRepository() (*git.Repository, error) {
-	// First, find the repository root using git rev-parse --show-toplevel
-	// This works correctly from any subdirectory within the repository
-	repoRoot, err := GetWorktreePath()
+	repoRoot, err := paths.RepoRoot()
 	if err != nil {
 		// Fallback to current directory if git command fails
 		// (e.g., if git is not installed or we're not in a repo)
@@ -1493,4 +1491,23 @@ func IsOnDefaultBranch(repo *git.Repository) (bool, string) {
 	}
 
 	return currentBranch == defaultBranch, currentBranch
+}
+
+// prepareTranscriptIfNeeded calls PrepareTranscript for agents that implement
+// the TranscriptPreparer interface. This ensures transcript files exist before
+// they are read (e.g., OpenCode creates its transcript lazily via `opencode export`).
+// Errors are silently ignored — this is best-effort for hook paths.
+func prepareTranscriptIfNeeded(agentType agent.AgentType, transcriptPath string) {
+	if transcriptPath == "" {
+		return
+	}
+	ag, err := agent.GetByAgentType(agentType)
+	if err != nil {
+		return
+	}
+	if preparer, ok := ag.(agent.TranscriptPreparer); ok {
+		// Best-effort: callers handle missing files gracefully.
+		// Transcript may not be available yet (e.g., agent not installed).
+		_ = preparer.PrepareTranscript(transcriptPath) //nolint:errcheck // Best-effort in hook path
+	}
 }

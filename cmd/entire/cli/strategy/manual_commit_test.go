@@ -1926,6 +1926,30 @@ func TestCountTranscriptItems(t *testing.T) {
 			}`,
 			expected: 4,
 		},
+		{
+			name:      "OpenCode export JSON with messages",
+			agentType: agent.AgentTypeOpenCode,
+			content: `{
+				"info": {"id": "session-1"},
+				"messages": [
+					{"info": {"role": "user"}, "parts": [{"type": "text", "text": "Hello"}]},
+					{"info": {"role": "assistant"}, "parts": [{"type": "text", "text": "Hi there!"}]}
+				]
+			}`,
+			expected: 2,
+		},
+		{
+			name:      "OpenCode export JSON empty messages",
+			agentType: agent.AgentTypeOpenCode,
+			content:   `{"info": {"id": "session-1"}, "messages": []}`,
+			expected:  0,
+		},
+		{
+			name:      "OpenCode invalid JSON",
+			agentType: agent.AgentTypeOpenCode,
+			content:   `not valid json`,
+			expected:  0,
+		},
 	}
 
 	for _, tt := range tests {

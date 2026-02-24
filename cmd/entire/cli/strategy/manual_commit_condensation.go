@@ -138,6 +138,8 @@ func (s *ManualCommitStrategy) CondenseSession(repo *git.Repository, checkpointI
 		if state.TranscriptPath == "" {
 			return nil, errors.New("shadow branch not found and no live transcript available")
 		}
+		// Ensure transcript file exists (OpenCode creates it lazily via `opencode export`)
+		prepareTranscriptIfNeeded(state.AgentType, state.TranscriptPath)
 		sessionData, err = s.extractSessionDataFromLiveTranscript(state)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract session data from live transcript: %w", err)
@@ -200,11 +202,26 @@ func (s *ManualCommitStrategy) CondenseSession(repo *git.Repository, checkpointI
 
 		// Scope transcript to this checkpoint's portion.
 		// For Claude Code (JSONL), CheckpointTranscriptStart is a line offset.
-		// For Gemini (JSON), CheckpointTranscriptStart is a message index.
+		// For Gemini/OpenCode (JSON), CheckpointTranscriptStart is a message index.
 		var scopedTranscript []byte
-		if state.AgentType == agent.AgentTypeGemini {
-			scopedTranscript = geminicli.SliceFromMessage(sessionData.Transcript, state.CheckpointTranscriptStart)
-		} else {
+		switch state.AgentType {
+		case agent.AgentTypeGemini:
+			scoped, sliceErr := geminicli.SliceFromMessage(sessionData.Transcript, state.CheckpointTranscriptStart)
+			if sliceErr != nil {
+				logging.Warn(summarizeCtx, "failed to scope Gemini transcript for summary",
+					slog.String("session_id", state.SessionID),
+					slog.String("error", sliceErr.Error()))
+			}
+			scopedTranscript = scoped
+		case agent.AgentTypeOpenCode:
+			scoped, sliceErr := opencode.SliceFromMessage(sessionData.Transcript, state.CheckpointTranscriptStart)
+			if sliceErr != nil {
+				logging.Warn(summarizeCtx, "failed to scope OpenCode transcript for summary",
+					slog.String("session_id", state.SessionID),
+					slog.String("error", sliceErr.Error()))
+			}
+			scopedTranscript = scoped
+		case agent.AgentTypeClaudeCode, agent.AgentTypeUnknown:
 			scopedTranscript = transcript.SliceFromLine(sessionData.Transcript, state.CheckpointTranscriptStart)
 		}
 		if len(scopedTranscript) > 0 {
@@ -241,7 +258,6 @@ func (s *ManualCommitStrategy) CondenseSession(repo *git.Repository, checkpointI
 		TranscriptIdentifierAtStart: state.TranscriptIdentifierAtStart,
 		CheckpointTranscriptStart:   state.CheckpointTranscriptStart,
 		TokenUsage:                  sessionData.TokenUsage,
-		ExportData:                  sessionData.ExportData,
 		InitialAttribution:          attribution,
 		Summary:                     summary,
 	}); err != nil {
@@ -398,6 +414,8 @@ func (s *ManualCommitStrategy) extractSessionData(repo *git.Repository, shadowRe
 	// (SaveStep is only called when there are file modifications).
 	var fullTranscript string
 	if liveTranscriptPath != "" {
+		// Ensure transcript file exists (OpenCode creates it lazily via `opencode export`)
+		prepareTranscriptIfNeeded(agentType, liveTranscriptPath)
 		if liveData, readErr := os.ReadFile(liveTranscriptPath); readErr == nil && len(liveData) > 0 { //nolint:gosec // path from session state
 			fullTranscript = string(liveData)
 		}
@@ -425,16 +443,6 @@ func (s *ManualCommitStrategy) extractSessionData(repo *git.Repository, shadowRe
 
 	// Use tracked files from session state (not all files in tree)
 	data.FilesTouched = filesTouched
-
-	// Read export data from local metadata directory (e.g., OpenCode SQLite export).
-	// This is written by lifecycle.go during TurnEnd and must be stored in the
-	// committed checkpoint so resume/rewind can re-import the session.
-	exportRelPath := metadataDir + "/" + paths.ExportDataFileName
-	if exportAbsPath, absErr := paths.AbsPath(exportRelPath); absErr == nil {
-		if exportBytes, readErr := os.ReadFile(exportAbsPath); readErr == nil && len(exportBytes) > 0 { //nolint:gosec // path from session metadata
-			data.ExportData = exportBytes
-		}
-	}
 
 	// Calculate token usage from the extracted transcript portion
 	if len(data.Transcript) > 0 {
@@ -478,15 +486,6 @@ func (s *ManualCommitStrategy) extractSessionDataFromLiveTranscript(state *Sessi
 		data.FilesTouched = s.extractModifiedFilesFromLiveTranscript(state, state.CheckpointTranscriptStart)
 	}
 
-	// Read export data from local metadata directory
-	metadataDir := paths.SessionMetadataDirFromSessionID(state.SessionID)
-	exportRelPath := metadataDir + "/" + paths.ExportDataFileName
-	if exportAbsPath, absErr := paths.AbsPath(exportRelPath); absErr == nil {
-		if exportBytes, readErr := os.ReadFile(exportAbsPath); readErr == nil && len(exportBytes) > 0 { //nolint:gosec // path from session metadata
-			data.ExportData = exportBytes
-		}
-	}
-
 	// Calculate token usage from the extracted transcript portion
 	if len(data.Transcript) > 0 {
 		data.TokenUsage = calculateTokenUsage(state.AgentType, data.Transcript, state.CheckpointTranscriptStart)
@@ -497,10 +496,19 @@ func (s *ManualCommitStrategy) extractSessionDataFromLiveTranscript(state *Sessi
 
 // countTranscriptItems counts lines (JSONL) or messages (JSON) in a transcript.
 // For Claude Code and JSONL-based agents, this counts lines.
-// For Gemini CLI and JSON-based agents, this counts messages.
+// For Gemini CLI, OpenCode, and JSON-based agents, this counts messages.
 // Returns 0 if the content is empty or malformed.
 func countTranscriptItems(agentType agent.AgentType, content string) int {
 	if content == "" {
+		return 0
+	}
+
+	// OpenCode uses export JSON format with {"info": {...}, "messages": [...]}
+	if agentType == agent.AgentTypeOpenCode {
+		session, err := opencode.ParseExportSession([]byte(content))
+		if err == nil && session != nil {
+			return len(session.Messages)
+		}
 		return 0
 	}
 

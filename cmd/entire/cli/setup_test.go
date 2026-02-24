@@ -12,6 +12,7 @@ import (
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode"
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/session"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 	"github.com/go-git/go-git/v5"
 )
@@ -27,6 +28,7 @@ func setupTestDir(t *testing.T) string {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 	paths.ClearRepoRootCache()
+	session.ClearGitCommonDirCache()
 	return tmpDir
 }
 
@@ -483,7 +485,7 @@ func TestRunUninstall_Force_RemovesGitHooks(t *testing.T) {
 	writeSettings(t, testSettingsEnabled)
 
 	// Install git hooks
-	if _, err := strategy.InstallGitHook(true); err != nil {
+	if _, err := strategy.InstallGitHook(true, false); err != nil {
 		t.Fatalf("InstallGitHook() error = %v", err)
 	}
 

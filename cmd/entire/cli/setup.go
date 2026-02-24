@@ -12,6 +12,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/session"
+	"github.com/entireio/cli/cmd/entire/cli/settings"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 
 	"github.com/charmbracelet/huh"
@@ -265,11 +266,10 @@ func runEnableWithStrategy(w io.Writer, agents []agent.Agent, selectedStrategy s
 		}
 	}
 
-	// Install git hooks AFTER saving settings (InstallGitHook reads local_dev from settings)
-	if _, err := strategy.InstallGitHook(true); err != nil {
+	if _, err := strategy.InstallGitHook(true, localDev); err != nil {
 		return fmt.Errorf("failed to install git hooks: %w", err)
 	}
-	strategy.CheckAndWarnHookManagers(w)
+	strategy.CheckAndWarnHookManagers(w, localDev)
 	fmt.Fprintln(w, "✓ Hooks installed")
 	fmt.Fprintf(w, "✓ Project configured (%s)\n", configDisplay)
 
@@ -351,11 +351,10 @@ func runEnableInteractive(w io.Writer, agents []agent.Agent, localDev, useLocalS
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
-	// Install git hooks AFTER saving settings (InstallGitHook reads local_dev from settings)
-	if _, err := strategy.InstallGitHook(true); err != nil {
+	if _, err := strategy.InstallGitHook(true, localDev); err != nil {
 		return fmt.Errorf("failed to install git hooks: %w", err)
 	}
-	strategy.CheckAndWarnHookManagers(w)
+	strategy.CheckAndWarnHookManagers(w, localDev)
 	fmt.Fprintln(w, "✓ Hooks installed")
 
 	configDisplay := configDisplayProject
@@ -769,11 +768,10 @@ func setupAgentHooksNonInteractive(w io.Writer, ag agent.Agent, strategyName str
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
-	// Install git hooks AFTER saving settings (InstallGitHook reads local_dev from settings)
-	if _, err := strategy.InstallGitHook(true); err != nil {
+	if _, err := strategy.InstallGitHook(true, localDev); err != nil {
 		return fmt.Errorf("failed to install git hooks: %w", err)
 	}
-	strategy.CheckAndWarnHookManagers(w)
+	strategy.CheckAndWarnHookManagers(w, localDev)
 
 	if installedHooks == 0 {
 		msg := fmt.Sprintf("Hooks for %s already installed", ag.Description())
@@ -870,13 +868,12 @@ func setupEntireDirectory() (bool, error) { //nolint:unparam // already present 
 
 // setupGitHook installs the prepare-commit-msg hook for context trailers.
 func setupGitHook() error {
-	// Use shared implementation from strategy package
-	// The localDev setting is read from settings.json
-	_, err := strategy.InstallGitHook(false) // not silent - show output during setup
-	if err != nil {
+	s, err := settings.Load()
+	localDev := err == nil && s.LocalDev
+	if _, err := strategy.InstallGitHook(false, localDev); err != nil {
 		return fmt.Errorf("failed to install git hook: %w", err)
 	}
-	strategy.CheckAndWarnHookManagers(os.Stderr)
+	strategy.CheckAndWarnHookManagers(os.Stderr, localDev)
 	return nil
 }
 

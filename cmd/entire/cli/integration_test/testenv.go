@@ -1558,7 +1558,10 @@ func (env *TestEnv) validateSessionMetadata(v CheckpointValidation) {
 	}
 }
 
-// validateTranscriptJSONL validates that full.jsonl exists and is valid JSONL.
+// validateTranscriptJSONL validates that full.jsonl exists and is valid JSON or JSONL.
+// It supports both:
+// - JSON format (single document, used by OpenCode and Gemini CLI)
+// - JSONL format (one JSON object per line, used by Claude Code)
 func (env *TestEnv) validateTranscriptJSONL(checkpointID string, expectedContent []string) {
 	env.T.Helper()
 
@@ -1568,23 +1571,29 @@ func (env *TestEnv) validateTranscriptJSONL(checkpointID string, expectedContent
 		env.T.Fatalf("Transcript not found at %s", transcriptPath)
 	}
 
-	// Validate it's valid JSONL (each non-empty line should be valid JSON)
-	lines := strings.Split(content, "\n")
-	validLines := 0
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	// First try to parse as a single JSON document (OpenCode/Gemini format)
+	var jsonDoc any
+	if err := json.Unmarshal([]byte(content), &jsonDoc); err == nil {
+		// Valid JSON document - validation passed
+	} else {
+		// Fall back to JSONL validation (Claude Code format)
+		lines := strings.Split(content, "\n")
+		validLines := 0
+		for i, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			validLines++
+			var obj map[string]any
+			if err := json.Unmarshal([]byte(line), &obj); err != nil {
+				env.T.Errorf("Transcript line %d is not valid JSON: %v\nLine: %s", i+1, err, line)
+			}
 		}
-		validLines++
-		var obj map[string]any
-		if err := json.Unmarshal([]byte(line), &obj); err != nil {
-			env.T.Errorf("Transcript line %d is not valid JSON: %v\nLine: %s", i+1, err, line)
-		}
-	}
 
-	if validLines == 0 {
-		env.T.Error("Transcript is empty (no valid JSONL lines)")
+		if validLines == 0 {
+			env.T.Error("Transcript is empty (no valid JSON content)")
+		}
 	}
 
 	// Validate expected content appears in transcript

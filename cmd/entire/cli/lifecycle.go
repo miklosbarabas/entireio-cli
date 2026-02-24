@@ -209,17 +209,6 @@ func handleLifecycleTurnEnd(ag agent.Agent, event *agent.Event) error {
 	}
 	fmt.Fprintf(os.Stderr, "Copied transcript to: %s\n", sessionDir+"/"+paths.TranscriptFileName)
 
-	// Copy export JSON if it exists alongside the transcript (written by OpenCode plugin).
-	// This is used by `opencode import` during resume/rewind to restore the session
-	// into OpenCode's SQLite database with the original session ID.
-	exportSrc := strings.TrimSuffix(transcriptRef, filepath.Ext(transcriptRef)) + ".export.json"
-	if exportData, readErr := os.ReadFile(exportSrc); readErr == nil { //nolint:gosec // Path derived from agent hook
-		exportDest := filepath.Join(sessionDirAbs, paths.ExportDataFileName)
-		if writeErr := os.WriteFile(exportDest, exportData, 0o600); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to write export data: %v\n", writeErr)
-		}
-	}
-
 	// Load pre-prompt state (captured on TurnStart)
 	preState, err := LoadPrePromptState(sessionID)
 	if err != nil {
@@ -417,7 +406,7 @@ func handleLifecycleTurnEnd(ag agent.Agent, event *agent.Event) error {
 		updateAutoCommitTranscriptPosition(sessionID, newTranscriptPosition)
 	}
 
-	// Transition session phase and cleanup
+	// Transition session phase and cleanup pre-prompt state
 	transitionSessionTurnEnd(sessionID)
 	if cleanupErr := CleanupPrePromptState(sessionID); cleanupErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup pre-prompt state: %v\n", cleanupErr)
@@ -470,6 +459,11 @@ func handleLifecycleSessionEnd(ag agent.Agent, event *agent.Event) error {
 	if event.SessionID == "" {
 		return nil // No session to update
 	}
+
+	// Note: We intentionally don't clean up cached transcripts here.
+	// Post-session commits (carry-forward in ENDED phase) may still need
+	// the transcript to extract file changes. Cleanup is handled by
+	// `entire clean` or when the session state is fully removed.
 
 	if err := markSessionEnded(event.SessionID); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to mark session ended: %v\n", err)

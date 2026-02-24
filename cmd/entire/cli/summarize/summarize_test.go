@@ -696,10 +696,16 @@ func TestGenerateFromTranscript_NilGenerator(t *testing.T) {
 }
 
 func TestBuildCondensedTranscriptFromBytes_OpenCodeUserAndAssistant(t *testing.T) {
-	ocJSONL := "{\"id\":\"msg-1\",\"role\":\"user\",\"content\":\"Fix the bug in main.go\",\"time\":{\"created\":1708300000}}\n" +
-		"{\"id\":\"msg-2\",\"role\":\"assistant\",\"content\":\"I'll fix the bug.\",\"time\":{\"created\":1708300001}}\n"
+	// OpenCode export JSON format
+	ocExportJSON := `{
+		"info": {"id": "test-session"},
+		"messages": [
+			{"info": {"id": "msg-1", "role": "user", "time": {"created": 1708300000}}, "parts": [{"type": "text", "text": "Fix the bug in main.go"}]},
+			{"info": {"id": "msg-2", "role": "assistant", "time": {"created": 1708300001}}, "parts": [{"type": "text", "text": "I'll fix the bug."}]}
+		]
+	}`
 
-	entries, err := BuildCondensedTranscriptFromBytes([]byte(ocJSONL), agent.AgentTypeOpenCode)
+	entries, err := BuildCondensedTranscriptFromBytes([]byte(ocExportJSON), agent.AgentTypeOpenCode)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -724,10 +730,20 @@ func TestBuildCondensedTranscriptFromBytes_OpenCodeUserAndAssistant(t *testing.T
 }
 
 func TestBuildCondensedTranscriptFromBytes_OpenCodeToolCalls(t *testing.T) {
-	ocJSONL := "{\"id\":\"msg-1\",\"role\":\"user\",\"content\":\"Edit main.go\",\"time\":{\"created\":1708300000}}\n" +
-		"{\"id\":\"msg-2\",\"role\":\"assistant\",\"content\":\"Editing now.\",\"time\":{\"created\":1708300001},\"parts\":[{\"type\":\"text\",\"text\":\"Editing now.\"},{\"type\":\"tool\",\"tool\":\"edit\",\"callID\":\"call-1\",\"state\":{\"status\":\"completed\",\"input\":{\"file_path\":\"main.go\"},\"output\":\"Applied\"}},{\"type\":\"tool\",\"tool\":\"bash\",\"callID\":\"call-2\",\"state\":{\"status\":\"completed\",\"input\":{\"command\":\"go test ./...\"},\"output\":\"PASS\"}}]}\n"
+	// OpenCode export JSON format with tool calls
+	ocExportJSON := `{
+		"info": {"id": "test-session"},
+		"messages": [
+			{"info": {"id": "msg-1", "role": "user", "time": {"created": 1708300000}}, "parts": [{"type": "text", "text": "Edit main.go"}]},
+			{"info": {"id": "msg-2", "role": "assistant", "time": {"created": 1708300001}}, "parts": [
+				{"type": "text", "text": "Editing now."},
+				{"type": "tool", "tool": "edit", "callID": "call-1", "state": {"status": "completed", "input": {"filePath": "main.go"}, "output": "Applied"}},
+				{"type": "tool", "tool": "bash", "callID": "call-2", "state": {"status": "completed", "input": {"command": "go test ./..."}, "output": "PASS"}}
+			]}
+		]
+	}`
 
-	entries, err := BuildCondensedTranscriptFromBytes([]byte(ocJSONL), agent.AgentTypeOpenCode)
+	entries, err := BuildCondensedTranscriptFromBytes([]byte(ocExportJSON), agent.AgentTypeOpenCode)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -756,11 +772,17 @@ func TestBuildCondensedTranscriptFromBytes_OpenCodeToolCalls(t *testing.T) {
 }
 
 func TestBuildCondensedTranscriptFromBytes_OpenCodeSkipsEmptyContent(t *testing.T) {
-	ocJSONL := "{\"id\":\"msg-1\",\"role\":\"user\",\"content\":\"\",\"time\":{\"created\":1708300000}}\n" +
-		"{\"id\":\"msg-2\",\"role\":\"assistant\",\"content\":\"\",\"time\":{\"created\":1708300001}}\n" +
-		"{\"id\":\"msg-3\",\"role\":\"user\",\"content\":\"Real prompt\",\"time\":{\"created\":1708300010}}\n"
+	// OpenCode export JSON format with empty content messages
+	ocExportJSON := `{
+		"info": {"id": "test-session"},
+		"messages": [
+			{"info": {"id": "msg-1", "role": "user", "time": {"created": 1708300000}}, "parts": []},
+			{"info": {"id": "msg-2", "role": "assistant", "time": {"created": 1708300001}}, "parts": []},
+			{"info": {"id": "msg-3", "role": "user", "time": {"created": 1708300010}}, "parts": [{"type": "text", "text": "Real prompt"}]}
+		]
+	}`
 
-	entries, err := BuildCondensedTranscriptFromBytes([]byte(ocJSONL), agent.AgentTypeOpenCode)
+	entries, err := BuildCondensedTranscriptFromBytes([]byte(ocExportJSON), agent.AgentTypeOpenCode)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -773,14 +795,11 @@ func TestBuildCondensedTranscriptFromBytes_OpenCodeSkipsEmptyContent(t *testing.
 	}
 }
 
-func TestBuildCondensedTranscriptFromBytes_OpenCodeInvalidJSONL(t *testing.T) {
-	// Invalid JSONL lines are silently skipped, producing 0 entries (not an error).
-	entries, err := BuildCondensedTranscriptFromBytes([]byte("not json\n"), agent.AgentTypeOpenCode)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("expected 0 entries for invalid JSONL, got %d", len(entries))
+func TestBuildCondensedTranscriptFromBytes_OpenCodeInvalidJSON(t *testing.T) {
+	// Invalid JSON now returns an error (not silently skipped like JSONL)
+	_, err := BuildCondensedTranscriptFromBytes([]byte("not json"), agent.AgentTypeOpenCode)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
 	}
 }
 

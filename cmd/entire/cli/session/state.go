@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
@@ -382,10 +383,43 @@ func (s *StateStore) stateFilePath(sessionID string) string {
 	return filepath.Join(s.stateDir, sessionID+".json")
 }
 
+// gitCommonDirCache caches the git common dir to avoid repeated subprocess calls.
+// Keyed by working directory to handle directory changes (same pattern as paths.RepoRoot).
+var (
+	gitCommonDirMu       sync.RWMutex
+	gitCommonDirCache    string
+	gitCommonDirCacheDir string
+)
+
+// ClearGitCommonDirCache clears the cached git common dir.
+// Useful for testing when changing directories.
+func ClearGitCommonDirCache() {
+	gitCommonDirMu.Lock()
+	gitCommonDirCache = ""
+	gitCommonDirCacheDir = ""
+	gitCommonDirMu.Unlock()
+}
+
 // getGitCommonDir returns the path to the shared git directory.
 // In a regular checkout, this is .git/
 // In a worktree, this is the main repo's .git/ (not .git/worktrees/<name>/)
+// The result is cached per working directory.
 func getGitCommonDir() (string, error) {
+	cwd, err := os.Getwd() //nolint:forbidigo // used for cache key, not git-relative paths
+	if err != nil {
+		cwd = ""
+	}
+
+	// Check cache with read lock first
+	gitCommonDirMu.RLock()
+	if gitCommonDirCache != "" && gitCommonDirCacheDir == cwd {
+		cached := gitCommonDirCache
+		gitCommonDirMu.RUnlock()
+		return cached, nil
+	}
+	gitCommonDirMu.RUnlock()
+
+	// Cache miss — resolve via git subprocess
 	ctx := context.Background()
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-common-dir")
 	cmd.Dir = "."
@@ -401,6 +435,12 @@ func getGitCommonDir() (string, error) {
 	if !filepath.IsAbs(commonDir) {
 		commonDir = filepath.Join(".", commonDir)
 	}
+	commonDir = filepath.Clean(commonDir)
 
-	return filepath.Clean(commonDir), nil
+	gitCommonDirMu.Lock()
+	gitCommonDirCache = commonDir
+	gitCommonDirCacheDir = cwd
+	gitCommonDirMu.Unlock()
+
+	return commonDir, nil
 }

@@ -1157,6 +1157,19 @@ func (s *ManualCommitStrategy) extractNewModifiedFilesFromLiveTranscript(state *
 		return nil, false
 	}
 
+	// Ensure transcript file is up-to-date (OpenCode creates/refreshes it via `opencode export`).
+	// Use the already-resolved agent to avoid a redundant lookup.
+	if preparer, ok := ag.(agent.TranscriptPreparer); ok {
+		if prepErr := preparer.PrepareTranscript(state.TranscriptPath); prepErr != nil {
+			logging.Debug(logCtx, "prepare transcript failed",
+				slog.String("session_id", state.SessionID),
+				slog.String("agent_type", string(state.AgentType)),
+				slog.String("transcript_path", state.TranscriptPath),
+				slog.Any("error", prepErr),
+			)
+		}
+	}
+
 	analyzer, ok := ag.(agent.TranscriptAnalyzer)
 	if !ok {
 		return nil, false
@@ -1192,6 +1205,19 @@ func (s *ManualCommitStrategy) extractModifiedFilesFromLiveTranscript(state *Ses
 	ag, err := agent.GetByAgentType(state.AgentType)
 	if err != nil {
 		return nil
+	}
+
+	// Ensure transcript file is up-to-date (OpenCode creates/refreshes it via `opencode export`).
+	// Use the already-resolved agent to avoid a redundant lookup.
+	if preparer, ok := ag.(agent.TranscriptPreparer); ok {
+		if prepErr := preparer.PrepareTranscript(state.TranscriptPath); prepErr != nil {
+			logging.Debug(logCtx, "prepare transcript failed",
+				slog.String("session_id", state.SessionID),
+				slog.String("agent_type", string(state.AgentType)),
+				slog.String("transcript_path", state.TranscriptPath),
+				slog.Any("error", prepErr),
+			)
+		}
 	}
 
 	analyzer, ok := ag.(agent.TranscriptAnalyzer)

@@ -1,36 +1,56 @@
 package opencode
 
 // sessionInfoRaw matches the JSON payload piped from the OpenCode plugin for session events.
+// The plugin sends only session_id; Go calls `opencode export` to get the transcript.
 type sessionInfoRaw struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
+	SessionID string `json:"session_id"`
 }
 
 // turnStartRaw matches the JSON payload for turn-start (user prompt submission).
 type turnStartRaw struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	Prompt         string `json:"prompt"`
+	SessionID string `json:"session_id"`
+	Prompt    string `json:"prompt"`
 }
 
-// --- Transcript types (JSONL format — one Message per line) ---
+// --- Export JSON types (from `opencode export`) ---
+
+// ExportSession represents the top-level structure of `opencode export` output.
+// This is OpenCode's native format for session data.
+type ExportSession struct {
+	Info     SessionInfo     `json:"info"`
+	Messages []ExportMessage `json:"messages"`
+}
+
+// SessionInfo contains session metadata from the export.
+type SessionInfo struct {
+	ID        string `json:"id"`
+	Title     string `json:"title,omitempty"`
+	CreatedAt int64  `json:"createdAt,omitempty"`
+	UpdatedAt int64  `json:"updatedAt,omitempty"`
+}
+
+// ExportMessage represents a single message in the export format.
+// Each message contains info (metadata) and parts (content).
+type ExportMessage struct {
+	Info  MessageInfo `json:"info"`
+	Parts []Part      `json:"parts"`
+}
+
+// MessageInfo contains message metadata.
+type MessageInfo struct {
+	ID        string  `json:"id"`
+	SessionID string  `json:"sessionID,omitempty"`
+	Role      string  `json:"role"` // "user" or "assistant"
+	Time      Time    `json:"time"`
+	Tokens    *Tokens `json:"tokens,omitempty"`
+	Cost      float64 `json:"cost,omitempty"`
+}
 
 // Message role constants.
 const (
 	roleAssistant = "assistant"
 	roleUser      = "user"
 )
-
-// Message represents a single message (one line) in the JSONL transcript.
-type Message struct {
-	ID      string  `json:"id"`
-	Role    string  `json:"role"` // "user" or "assistant"
-	Content string  `json:"content"`
-	Time    Time    `json:"time"`
-	Tokens  *Tokens `json:"tokens,omitempty"`
-	Cost    float64 `json:"cost,omitempty"`
-	Parts   []Part  `json:"parts,omitempty"`
-}
 
 // Time holds message timestamps.
 type Time struct {
@@ -63,9 +83,9 @@ type Part struct {
 
 // ToolState represents tool execution state.
 type ToolState struct {
-	Status string                 `json:"status"` // "pending", "running", "completed", "error"
-	Input  map[string]interface{} `json:"input,omitempty"`
-	Output string                 `json:"output,omitempty"`
+	Status string         `json:"status"` // "pending", "running", "completed", "error"
+	Input  map[string]any `json:"input,omitempty"`
+	Output string         `json:"output,omitempty"`
 }
 
 // FileModificationTools are tools in OpenCode that modify files on disk.

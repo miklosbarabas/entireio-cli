@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,82 +9,120 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 )
 
-// testTranscriptJSONL is a JSONL transcript with 4 messages (one per line).
-const testTranscriptJSONL = `{"id":"msg-1","role":"user","content":"Fix the bug in main.go","time":{"created":1708300000}}
-{"id":"msg-2","role":"assistant","content":"I'll fix the bug.","time":{"created":1708300001,"completed":1708300005},"tokens":{"input":150,"output":80,"reasoning":10,"cache":{"read":5,"write":15}},"cost":0.003,"parts":[{"type":"text","text":"I'll fix the bug."},{"type":"tool","tool":"edit","callID":"call-1","state":{"status":"completed","input":{"file_path":"main.go"},"output":"Applied edit"}}]}
-{"id":"msg-3","role":"user","content":"Also fix util.go","time":{"created":1708300010}}
-{"id":"msg-4","role":"assistant","content":"Done fixing util.go.","time":{"created":1708300011,"completed":1708300015},"tokens":{"input":200,"output":100,"reasoning":5,"cache":{"read":10,"write":20}},"cost":0.005,"parts":[{"type":"tool","tool":"write","callID":"call-2","state":{"status":"completed","input":{"file_path":"util.go"},"output":"File written"}},{"type":"text","text":"Done fixing util.go."}]}
-`
+// testExportJSON is an export JSON transcript with 4 messages.
+var testExportJSON = func() string {
+	session := ExportSession{
+		Info: SessionInfo{ID: "test-session-id"},
+		Messages: []ExportMessage{
+			{
+				Info: MessageInfo{ID: "msg-1", Role: "user", Time: Time{Created: 1708300000}},
+				Parts: []Part{
+					{Type: "text", Text: "Fix the bug in main.go"},
+				},
+			},
+			{
+				Info: MessageInfo{
+					ID: "msg-2", Role: "assistant",
+					Time:   Time{Created: 1708300001, Completed: 1708300005},
+					Tokens: &Tokens{Input: 150, Output: 80, Reasoning: 10, Cache: Cache{Read: 5, Write: 15}},
+					Cost:   0.003,
+				},
+				Parts: []Part{
+					{Type: "text", Text: "I'll fix the bug."},
+					{Type: "tool", Tool: "edit", CallID: "call-1", State: &ToolState{Status: "completed", Input: map[string]any{"filePath": "main.go"}, Output: "Applied edit"}},
+				},
+			},
+			{
+				Info: MessageInfo{ID: "msg-3", Role: "user", Time: Time{Created: 1708300010}},
+				Parts: []Part{
+					{Type: "text", Text: "Also fix util.go"},
+				},
+			},
+			{
+				Info: MessageInfo{
+					ID: "msg-4", Role: "assistant",
+					Time:   Time{Created: 1708300011, Completed: 1708300015},
+					Tokens: &Tokens{Input: 200, Output: 100, Reasoning: 5, Cache: Cache{Read: 10, Write: 20}},
+					Cost:   0.005,
+				},
+				Parts: []Part{
+					{Type: "tool", Tool: "write", CallID: "call-2", State: &ToolState{Status: "completed", Input: map[string]any{"filePath": "util.go"}, Output: "File written"}},
+					{Type: "text", Text: "Done fixing util.go."},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}()
 
 func writeTestTranscript(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "test-session.jsonl")
+	path := filepath.Join(dir, "test-session.json")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write test transcript: %v", err)
 	}
 	return path
 }
 
-func TestParseMessages(t *testing.T) {
+func TestParseExportSession(t *testing.T) {
 	t.Parallel()
 
-	messages, err := ParseMessages([]byte(testTranscriptJSONL))
+	session, err := ParseExportSession([]byte(testExportJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(messages) != 4 {
-		t.Fatalf("expected 4 messages, got %d", len(messages))
+	if session == nil {
+		t.Fatal("expected non-nil session")
 	}
-	if messages[0].ID != "msg-1" {
-		t.Errorf("expected first message ID 'msg-1', got %q", messages[0].ID)
+	if len(session.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(session.Messages))
 	}
-	if messages[0].Role != "user" {
-		t.Errorf("expected first message role 'user', got %q", messages[0].Role)
+	if session.Messages[0].Info.ID != "msg-1" {
+		t.Errorf("expected first message ID 'msg-1', got %q", session.Messages[0].Info.ID)
+	}
+	if session.Messages[0].Info.Role != "user" {
+		t.Errorf("expected first message role 'user', got %q", session.Messages[0].Info.Role)
 	}
 }
 
-func TestParseMessages_Empty(t *testing.T) {
+func TestParseExportSession_Empty(t *testing.T) {
 	t.Parallel()
 
-	messages, err := ParseMessages(nil)
+	session, err := ParseExportSession(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if messages != nil {
-		t.Errorf("expected nil for nil data, got %d messages", len(messages))
+	if session != nil {
+		t.Errorf("expected nil for nil data, got %+v", session)
 	}
 
-	messages, err = ParseMessages([]byte(""))
+	session, err = ParseExportSession([]byte(""))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if messages != nil {
-		t.Errorf("expected nil for empty data, got %d messages", len(messages))
+	if session != nil {
+		t.Errorf("expected nil for empty data, got %+v", session)
 	}
 }
 
-func TestParseMessages_InvalidLines(t *testing.T) {
+func TestParseExportSession_InvalidJSON(t *testing.T) {
 	t.Parallel()
 
-	// Invalid lines are silently skipped
-	data := "not json\n{\"id\":\"msg-1\",\"role\":\"user\",\"content\":\"hello\"}\n"
-	messages, err := ParseMessages([]byte(data))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 valid message, got %d", len(messages))
-	}
-	if messages[0].Content != "hello" {
-		t.Errorf("expected content 'hello', got %q", messages[0].Content)
+	_, err := ParseExportSession([]byte("not json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
 	}
 }
 
 func TestGetTranscriptPosition(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	path := writeTestTranscript(t, testTranscriptJSONL)
+	path := writeTestTranscript(t, testExportJSON)
 
 	pos, err := ag.GetTranscriptPosition(path)
 	if err != nil {
@@ -98,7 +137,7 @@ func TestGetTranscriptPosition_NonexistentFile(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
 
-	pos, err := ag.GetTranscriptPosition("/nonexistent/path.jsonl")
+	pos, err := ag.GetTranscriptPosition("/nonexistent/path.json")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +149,7 @@ func TestGetTranscriptPosition_NonexistentFile(t *testing.T) {
 func TestExtractModifiedFilesFromOffset(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	path := writeTestTranscript(t, testTranscriptJSONL)
+	path := writeTestTranscript(t, testExportJSON)
 
 	// From offset 0 — should get both main.go and util.go
 	files, pos, err := ag.ExtractModifiedFilesFromOffset(path, 0)
@@ -140,10 +179,106 @@ func TestExtractModifiedFilesFromOffset(t *testing.T) {
 	}
 }
 
+func TestExtractFilePathFromInput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input map[string]any
+		want  string
+	}{
+		{name: "camelCase filePath (OpenCode native format)", input: map[string]any{"filePath": "/repo/main.go"}, want: "/repo/main.go"},
+		{name: "path key", input: map[string]any{"path": "/repo/main.go"}, want: "/repo/main.go"},
+		{name: "filePath takes priority over path", input: map[string]any{"filePath": "/a.go", "path": "/b.go"}, want: "/a.go"},
+		{name: "empty input", input: map[string]any{}, want: ""},
+		{name: "non-string value", input: map[string]any{"filePath": 42}, want: ""},
+		{name: "empty string value", input: map[string]any{"filePath": ""}, want: ""},
+		{name: "unrecognized keys ignored", input: map[string]any{"file_path": "/repo/main.go", "file": "/repo/main.go"}, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractFilePathFromInput(tt.input)
+			if got != tt.want {
+				t.Errorf("extractFilePathFromInput(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// testCamelCaseExportJSON uses camelCase "filePath" keys matching real OpenCode export format.
+var testCamelCaseExportJSON = func() string {
+	session := ExportSession{
+		Info: SessionInfo{ID: "test-camelcase"},
+		Messages: []ExportMessage{
+			{
+				Info: MessageInfo{ID: "msg-1", Role: "user", Time: Time{Created: 1708300000}},
+				Parts: []Part{
+					{Type: "text", Text: "Fix the bug"},
+				},
+			},
+			{
+				Info: MessageInfo{ID: "msg-2", Role: "assistant", Time: Time{Created: 1708300001, Completed: 1708300005}},
+				Parts: []Part{
+					{Type: "tool", Tool: "write", CallID: "call-1", State: &ToolState{Status: "completed", Input: map[string]any{"filePath": "/repo/new_file.rb", "content": "puts 'hello'"}, Output: "Wrote file"}},
+				},
+			},
+			{
+				Info: MessageInfo{ID: "msg-3", Role: "user", Time: Time{Created: 1708300010}},
+				Parts: []Part{
+					{Type: "text", Text: "Now edit it"},
+				},
+			},
+			{
+				Info: MessageInfo{ID: "msg-4", Role: "assistant", Time: Time{Created: 1708300011, Completed: 1708300015}},
+				Parts: []Part{
+					{Type: "tool", Tool: "edit", CallID: "call-2", State: &ToolState{Status: "completed", Input: map[string]any{"filePath": "/repo/new_file.rb", "oldString": "hello", "newString": "world"}, Output: "Edit applied"}},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}()
+
+func TestExtractModifiedFilesFromOffset_CamelCaseFilePath(t *testing.T) {
+	t.Parallel()
+	ag := &OpenCodeAgent{}
+	path := writeTestTranscript(t, testCamelCaseExportJSON)
+
+	files, pos, err := ag.ExtractModifiedFilesFromOffset(path, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pos != 4 {
+		t.Errorf("expected position 4, got %d", pos)
+	}
+	// Both write (msg-2) and edit (msg-4) reference the same file, so deduplicated to 1
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file (deduplicated), got %d: %v", len(files), files)
+	}
+	if files[0] != "/repo/new_file.rb" {
+		t.Errorf("expected '/repo/new_file.rb', got %q", files[0])
+	}
+
+	// From offset 2 — should still find the edit in msg-4
+	files, _, err = ag.ExtractModifiedFilesFromOffset(path, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d: %v", len(files), files)
+	}
+}
+
 func TestExtractPrompts(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	path := writeTestTranscript(t, testTranscriptJSONL)
+	path := writeTestTranscript(t, testExportJSON)
 
 	// From offset 0 — both prompts
 	prompts, err := ag.ExtractPrompts(path, 0)
@@ -173,7 +308,7 @@ func TestExtractPrompts(t *testing.T) {
 func TestExtractSummary(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	path := writeTestTranscript(t, testTranscriptJSONL)
+	path := writeTestTranscript(t, testExportJSON)
 
 	summary, err := ag.ExtractSummary(path)
 	if err != nil {
@@ -187,7 +322,12 @@ func TestExtractSummary(t *testing.T) {
 func TestExtractSummary_EmptyTranscript(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	path := writeTestTranscript(t, "")
+	emptySession := ExportSession{Info: SessionInfo{ID: "empty"}, Messages: []ExportMessage{}}
+	data, err := json.Marshal(emptySession)
+	if err != nil {
+		t.Fatalf("failed to marshal empty session: %v", err)
+	}
+	path := writeTestTranscript(t, string(data))
 
 	summary, err := ag.ExtractSummary(path)
 	if err != nil {
@@ -201,7 +341,7 @@ func TestExtractSummary_EmptyTranscript(t *testing.T) {
 func TestCalculateTokenUsage(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	path := writeTestTranscript(t, testTranscriptJSONL)
+	path := writeTestTranscript(t, testExportJSON)
 
 	// From offset 0 — both assistant messages
 	usage, err := ag.CalculateTokenUsage(path, 0)
@@ -231,7 +371,7 @@ func TestCalculateTokenUsage(t *testing.T) {
 func TestCalculateTokenUsage_FromOffset(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	path := writeTestTranscript(t, testTranscriptJSONL)
+	path := writeTestTranscript(t, testExportJSON)
 
 	usage, err := ag.CalculateTokenUsage(path, 2)
 	if err != nil {
@@ -252,7 +392,7 @@ func TestCalculateTokenUsage_NonexistentFile(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
 
-	usage, err := ag.CalculateTokenUsage("/nonexistent/path.jsonl", 0)
+	usage, err := ag.CalculateTokenUsage("/nonexistent/path.json", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,7 +404,7 @@ func TestCalculateTokenUsage_NonexistentFile(t *testing.T) {
 func TestChunkTranscript_SmallContent(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	content := []byte(testTranscriptJSONL)
+	content := []byte(testExportJSON)
 
 	// maxSize larger than content — should return single chunk
 	chunks, err := ag.ChunkTranscript(content, len(content)+1000)
@@ -274,17 +414,14 @@ func TestChunkTranscript_SmallContent(t *testing.T) {
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk for small content, got %d", len(chunks))
 	}
-	if string(chunks[0]) != string(content) {
-		t.Error("expected chunk to match original content")
-	}
 }
 
 func TestChunkTranscript_SplitsLargeContent(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	content := []byte(testTranscriptJSONL)
+	content := []byte(testExportJSON)
 
-	// Use a maxSize that fits individual lines but forces splitting (assistant lines are ~370-400 bytes)
+	// Use a maxSize that forces splitting
 	chunks, err := ag.ChunkTranscript(content, 500)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -293,13 +430,13 @@ func TestChunkTranscript_SplitsLargeContent(t *testing.T) {
 		t.Fatalf("expected multiple chunks for small maxSize, got %d", len(chunks))
 	}
 
-	// Each chunk should contain valid JSONL
+	// Each chunk should contain valid export JSON
 	for i, chunk := range chunks {
-		messages, parseErr := ParseMessages(chunk)
+		session, parseErr := ParseExportSession(chunk)
 		if parseErr != nil {
 			t.Fatalf("chunk %d: failed to parse: %v", i, parseErr)
 		}
-		if len(messages) == 0 {
+		if session == nil || len(session.Messages) == 0 {
 			t.Errorf("chunk %d: expected at least 1 message", i)
 		}
 	}
@@ -308,9 +445,9 @@ func TestChunkTranscript_SplitsLargeContent(t *testing.T) {
 func TestChunkTranscript_RoundTrip(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	content := []byte(testTranscriptJSONL)
+	content := []byte(testExportJSON)
 
-	// Split into chunks (maxSize must fit individual JSONL lines)
+	// Split into chunks
 	chunks, err := ag.ChunkTranscript(content, 500)
 	if err != nil {
 		t.Fatalf("chunk error: %v", err)
@@ -323,21 +460,21 @@ func TestChunkTranscript_RoundTrip(t *testing.T) {
 	}
 
 	// Parse both and compare messages
-	original, parseErr := ParseMessages(content)
+	original, parseErr := ParseExportSession(content)
 	if parseErr != nil {
 		t.Fatalf("failed to parse original: %v", parseErr)
 	}
-	result, parseErr := ParseMessages(reassembled)
+	result, parseErr := ParseExportSession(reassembled)
 	if parseErr != nil {
 		t.Fatalf("failed to parse reassembled: %v", parseErr)
 	}
 
-	if len(result) != len(original) {
-		t.Fatalf("message count mismatch: %d vs %d", len(result), len(original))
+	if len(result.Messages) != len(original.Messages) {
+		t.Fatalf("message count mismatch: %d vs %d", len(result.Messages), len(original.Messages))
 	}
-	for i, msg := range result {
-		if msg.ID != original[i].ID {
-			t.Errorf("message %d: ID mismatch %q vs %q", i, msg.ID, original[i].ID)
+	for i, msg := range result.Messages {
+		if msg.Info.ID != original.Messages[i].Info.ID {
+			t.Errorf("message %d: ID mismatch %q vs %q", i, msg.Info.ID, original.Messages[i].Info.ID)
 		}
 	}
 }
@@ -346,26 +483,39 @@ func TestChunkTranscript_EmptyContent(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
 
-	chunks, err := ag.ChunkTranscript([]byte(""), 100)
+	emptySession := ExportSession{Info: SessionInfo{ID: "empty"}, Messages: []ExportMessage{}}
+	data, err := json.Marshal(emptySession)
+	if err != nil {
+		t.Fatalf("failed to marshal empty session: %v", err)
+	}
+
+	chunks, err := ag.ChunkTranscript(data, 100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(chunks) != 0 {
-		t.Fatalf("expected 0 chunks for empty content, got %d", len(chunks))
+	// Empty messages should return single chunk with the original content
+	if len(chunks) != 1 {
+		t.Fatalf("expected 1 chunk for empty messages, got %d", len(chunks))
 	}
 }
 
 func TestReassembleTranscript_SingleChunk(t *testing.T) {
 	t.Parallel()
 	ag := &OpenCodeAgent{}
-	content := []byte(testTranscriptJSONL)
+	content := []byte(testExportJSON)
 
 	result, err := ag.ReassembleTranscript([][]byte{content})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(result) != string(content) {
-		t.Error("single chunk reassembly should return original content")
+
+	// Verify the result is valid JSON
+	session, parseErr := ParseExportSession(result)
+	if parseErr != nil {
+		t.Fatalf("failed to parse result: %v", parseErr)
+	}
+	if len(session.Messages) != 4 {
+		t.Errorf("expected 4 messages, got %d", len(session.Messages))
 	}
 }
 
@@ -374,18 +524,18 @@ func TestReassembleTranscript_Empty(t *testing.T) {
 	ag := &OpenCodeAgent{}
 
 	result, err := ag.ReassembleTranscript(nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for nil chunks, got nil")
 	}
-	if len(result) != 0 {
-		t.Errorf("expected empty result for nil chunks, got %d bytes", len(result))
+	if result != nil {
+		t.Errorf("expected nil result for nil chunks, got %d bytes", len(result))
 	}
 }
 
 func TestExtractModifiedFiles(t *testing.T) {
 	t.Parallel()
 
-	files, err := ExtractModifiedFiles([]byte(testTranscriptJSONL))
+	files, err := ExtractModifiedFiles([]byte(testExportJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -274,3 +274,157 @@ func TestOpenCodeMultiTurnCondensation(t *testing.T) {
 		},
 	})
 }
+
+// TestOpenCodeMidTurnCommit verifies that when OpenCode's agent commits mid-turn
+// (before turn-end), the commit gets an Entire-Checkpoint trailer AND the checkpoint
+// data is written to entire/checkpoints/v1.
+//
+// This tests the PrepareTranscript fix: OpenCode's transcript file is created lazily
+// at turn-end via `opencode export`. When a commit happens mid-turn, PrepareTranscript
+// is called to create the transcript on-demand so condensation can read it.
+func TestOpenCodeMidTurnCommit(t *testing.T) {
+	t.Parallel()
+
+	env := NewFeatureBranchEnv(t, strategy.StrategyNameManualCommit)
+	env.InitEntireWithAgent(strategy.StrategyNameManualCommit, agent.AgentNameOpenCode)
+
+	session := env.NewOpenCodeSession()
+
+	// 1. session-start
+	if err := env.SimulateOpenCodeSessionStart(session.ID, session.TranscriptPath); err != nil {
+		t.Fatalf("session-start error: %v", err)
+	}
+
+	// 2. turn-start (session becomes ACTIVE)
+	if err := env.SimulateOpenCodeTurnStart(session.ID, session.TranscriptPath, "Add a script and commit it"); err != nil {
+		t.Fatalf("turn-start error: %v", err)
+	}
+
+	// 3. Agent creates file
+	env.WriteFile("script.sh", "#!/bin/bash\necho hello")
+
+	// 4. Create transcript reflecting the file change.
+	session.CreateOpenCodeTranscript("Add a script and commit it", []FileChange{
+		{Path: "script.sh", Content: "#!/bin/bash\necho hello"},
+	})
+
+	// 5. Copy transcript to .entire/tmp/ where PrepareTranscript will find it.
+	// In production, `opencode export` refreshes this file on each call.
+	// In tests, ENTIRE_TEST_OPENCODE_MOCK_EXPORT makes fetchAndCacheExport
+	// read from the pre-written file at .entire/tmp/<sessionID>.json.
+	// PrepareTranscript ALWAYS calls fetchAndCacheExport (even if file exists)
+	// to ensure fresh data for resumed sessions.
+	env.CopyTranscriptToEntireTmp(session.ID, session.TranscriptPath)
+
+	// 6. Agent commits mid-turn (no turn-end yet!)
+	// This triggers: PrepareCommitMsg (adds trailer) → PostCommit (runs condensation)
+	// Condensation needs the transcript, which PrepareTranscript should provide.
+	env.GitCommitWithShadowHooksAsAgent("Add script", "script.sh")
+
+	// 7. Verify commit has checkpoint trailer
+	commitHash := env.GetHeadHash()
+	checkpointID := env.GetCheckpointIDFromCommitMessage(commitHash)
+	if checkpointID == "" {
+		t.Fatal("mid-turn agent commit should have Entire-Checkpoint trailer")
+	}
+	t.Logf("Mid-turn commit has checkpoint ID: %s", checkpointID)
+
+	// 8. CRITICAL: Verify checkpoint data was written to entire/checkpoints/v1
+	transcriptPath := SessionFilePath(checkpointID, paths.TranscriptFileName)
+	_, found := env.ReadFileFromBranch(paths.MetadataBranchName, transcriptPath)
+	if !found {
+		t.Error("checkpoint transcript should exist on metadata branch after mid-turn commit")
+	}
+
+	// 9. Validate checkpoint metadata
+	env.ValidateCheckpoint(CheckpointValidation{
+		CheckpointID: checkpointID,
+		Strategy:     strategy.StrategyNameManualCommit,
+		FilesTouched: []string{"script.sh"},
+	})
+}
+
+// TestOpenCodeResumedSessionAfterCommit verifies that resuming an OpenCode session
+// after a commit correctly creates a checkpoint for the second turn.
+//
+// Scenario:
+//  1. Turn 1: create new file → checkpoint → user commits (condensation)
+//  2. Turn 2 (resumed): modify the now-tracked file → checkpoint should be created
+func TestOpenCodeResumedSessionAfterCommit(t *testing.T) {
+	t.Parallel()
+
+	RunForAllStrategies(t, func(t *testing.T, env *TestEnv, strategyName string) {
+		env.InitEntireWithAgent(strategyName, agent.AgentNameOpenCode)
+
+		session := env.NewOpenCodeSession()
+		transcriptPath := session.TranscriptPath
+
+		// === Turn 1: Create a new file ===
+		if err := env.SimulateOpenCodeSessionStart(session.ID, transcriptPath); err != nil {
+			t.Fatalf("session-start error: %v", err)
+		}
+		if err := env.SimulateOpenCodeTurnStart(session.ID, transcriptPath, "Create app.go"); err != nil {
+			t.Fatalf("turn-start 1 error: %v", err)
+		}
+
+		env.WriteFile("app.go", "package main\nfunc main() {}")
+		session.CreateOpenCodeTranscript("Create app.go", []FileChange{
+			{Path: "app.go", Content: "package main\nfunc main() {}"},
+		})
+
+		if err := env.SimulateOpenCodeTurnEnd(session.ID, transcriptPath); err != nil {
+			t.Fatalf("turn-end 1 error: %v", err)
+		}
+
+		points1 := env.GetRewindPoints()
+		if len(points1) == 0 {
+			t.Fatal("expected rewind point after turn 1")
+		}
+
+		// === User commits (triggers condensation) ===
+		// For auto-commit, turn-end already committed the file.
+		// For manual-commit, user commits manually.
+		if strategyName == strategy.StrategyNameManualCommit {
+			env.GitCommitWithShadowHooks("Create app", "app.go")
+		}
+
+		// Verify condensation happened
+		checkpointID := env.TryGetLatestCheckpointID()
+		if checkpointID == "" {
+			t.Fatal("expected checkpoint on metadata branch after commit")
+		}
+
+		// === Turn 2 (resumed): Modify the now-tracked file ===
+		if err := env.SimulateOpenCodeTurnStart(session.ID, transcriptPath, "Add color output"); err != nil {
+			t.Fatalf("turn-start 2 error: %v", err)
+		}
+
+		env.WriteFile("app.go", "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"hello\") }")
+		session.CreateOpenCodeTranscript("Add color output", []FileChange{
+			{Path: "app.go", Content: "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"hello\") }"},
+		})
+
+		if err := env.SimulateOpenCodeTurnEnd(session.ID, transcriptPath); err != nil {
+			t.Fatalf("turn-end 2 error: %v", err)
+		}
+
+		// === Verify: a new checkpoint was created for turn 2 ===
+		points2 := env.GetRewindPoints()
+		if len(points2) == 0 {
+			t.Fatal("expected rewind point after turn 2 (resumed session), got none")
+		}
+
+		// For manual-commit: commit turn 2 and verify second condensation
+		if strategyName == strategy.StrategyNameManualCommit {
+			env.GitCommitWithShadowHooks("Add color output", "app.go")
+
+			checkpointID2 := env.TryGetLatestCheckpointID()
+			if checkpointID2 == "" {
+				t.Fatal("expected second checkpoint on metadata branch after turn 2 commit")
+			}
+			if checkpointID2 == checkpointID {
+				t.Error("second checkpoint ID should differ from first")
+			}
+		}
+	})
+}

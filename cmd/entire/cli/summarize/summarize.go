@@ -169,28 +169,33 @@ func buildCondensedTranscriptFromGemini(content []byte) ([]Entry, error) {
 	return entries, nil
 }
 
-// buildCondensedTranscriptFromOpenCode parses OpenCode JSONL transcript and extracts a condensed view.
+// buildCondensedTranscriptFromOpenCode parses OpenCode export JSON transcript and extracts a condensed view.
 func buildCondensedTranscriptFromOpenCode(content []byte) ([]Entry, error) {
-	messages, err := opencode.ParseMessages(content)
+	session, err := opencode.ParseExportSession(content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse OpenCode transcript: %w", err)
 	}
+	if session == nil {
+		return nil, nil
+	}
 
 	var entries []Entry
-	for _, msg := range messages {
-		switch msg.Role {
+	for _, msg := range session.Messages {
+		switch msg.Info.Role {
 		case "user":
-			if msg.Content != "" {
+			text := opencode.ExtractTextFromParts(msg.Parts)
+			if text != "" {
 				entries = append(entries, Entry{
 					Type:    EntryTypeUser,
-					Content: msg.Content,
+					Content: text,
 				})
 			}
 		case "assistant":
-			if msg.Content != "" {
+			text := opencode.ExtractTextFromParts(msg.Parts)
+			if text != "" {
 				entries = append(entries, Entry{
 					Type:    EntryTypeAssistant,
-					Content: msg.Content,
+					Content: text,
 				})
 			}
 			for _, part := range msg.Parts {
@@ -198,7 +203,7 @@ func buildCondensedTranscriptFromOpenCode(content []byte) ([]Entry, error) {
 					entries = append(entries, Entry{
 						Type:       EntryTypeTool,
 						ToolName:   part.Tool,
-						ToolDetail: extractGenericToolDetail(part.State.Input),
+						ToolDetail: extractOpenCodeToolDetail(part.State.Input),
 					})
 				}
 			}
@@ -208,8 +213,19 @@ func buildCondensedTranscriptFromOpenCode(content []byte) ([]Entry, error) {
 	return entries, nil
 }
 
+// extractOpenCodeToolDetail extracts a detail string from an OpenCode tool's input map.
+// OpenCode uses camelCase keys (e.g., "filePath" instead of "file_path").
+func extractOpenCodeToolDetail(input map[string]interface{}) string {
+	for _, key := range []string{"description", "command", "filePath", "path", "pattern"} {
+		if v, ok := input[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // extractGenericToolDetail extracts an appropriate detail string from a tool's input/args map.
-// Checks common fields in order of preference. Used by both OpenCode and Gemini condensation.
+// Checks common fields in order of preference. Used by Gemini condensation.
 func extractGenericToolDetail(input map[string]interface{}) string {
 	for _, key := range []string{"description", "command", "file_path", "path", "pattern"} {
 		if v, ok := input[key].(string); ok && v != "" {

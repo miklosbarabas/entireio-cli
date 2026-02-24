@@ -495,7 +495,7 @@ func resumeSingleSession(ctx context.Context, ag agent.Agent, sessionID string, 
 		return nil
 	}
 
-	logContent, _, exportData, err := checkpoint.LookupSessionLog(checkpointID)
+	logContent, _, err := checkpoint.LookupSessionLog(checkpointID)
 	if err != nil {
 		if errors.Is(err, checkpoint.ErrCheckpointNotFound) || errors.Is(err, checkpoint.ErrNoTranscript) {
 			logging.Debug(ctx, "resume session completed (no metadata)",
@@ -544,14 +544,12 @@ func resumeSingleSession(ctx context.Context, ag agent.Agent, sessionID string, 
 		return fmt.Errorf("failed to create session directory: %w", err)
 	}
 
-	// Create an AgentSession with the native data
 	agentSession := &agent.AgentSession{
 		SessionID:  sessionID,
 		AgentName:  ag.Name(),
 		RepoPath:   repoRoot,
 		SessionRef: sessionLogPath,
 		NativeData: logContent,
-		ExportData: exportData,
 	}
 
 	// Write the session using the agent's WriteSession method

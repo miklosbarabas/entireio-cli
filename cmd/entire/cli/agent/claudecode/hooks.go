@@ -66,7 +66,7 @@ func (c *ClaudeCodeAgent) InstallHooks(localDev bool, force bool) (int, error) {
 	// rawPermissions preserves unknown permission fields (e.g., "ask")
 	var rawPermissions map[string]json.RawMessage
 
-	existingData, readErr := os.ReadFile(settingsPath) //nolint:gosec // path is constructed from cwd + fixed path
+	existingData, readErr := os.ReadFile(settingsPath) //nolint:gosec // path is constructed from repo root + settings file name
 	if readErr == nil {
 		if err := json.Unmarshal(existingData, &rawSettings); err != nil {
 			return 0, fmt.Errorf("failed to parse existing settings.json: %w", err)
