@@ -11,10 +11,10 @@ import (
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode" // Register claude-code agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode"     // Register claude-code agent
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid" // Register factoryai-droid agent
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"  // Register gemini agent
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/opencode"   // Register opencode agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"      // Register gemini agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/opencode"       // Register opencode agent
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

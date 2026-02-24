@@ -97,7 +97,7 @@ func (f *FactoryAIDroidAgent) ExtractSummary(sessionRef string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("failed to read transcript: %w", err)
 	}
-	lines, err := ParseDroidTranscriptFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse transcript: %w", err)
 	}

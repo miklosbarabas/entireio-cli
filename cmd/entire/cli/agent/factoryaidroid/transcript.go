@@ -47,8 +47,11 @@ func ParseDroidTranscript(path string, startLine int) ([]transcript.Line, int, e
 }
 
 // ParseDroidTranscriptFromBytes parses Droid JSONL content from a byte slice.
-func ParseDroidTranscriptFromBytes(content []byte) ([]transcript.Line, error) {
-	lines, _, err := parseDroidTranscriptFromReader(bytes.NewReader(content), 0)
+// startLine skips the first N raw JSONL lines before parsing (0 = parse all).
+// This mirrors ParseDroidTranscript's startLine parameter, applying the offset
+// at the raw line level before filtering out non-message entries.
+func ParseDroidTranscriptFromBytes(content []byte, startLine int) ([]transcript.Line, error) {
+	lines, _, err := parseDroidTranscriptFromReader(bytes.NewReader(content), startLine)
 	return lines, err
 }
 
@@ -109,20 +112,6 @@ func parseDroidLine(lineBytes []byte) (transcript.Line, bool) {
 		UUID:    env.ID,
 		Message: env.Message,
 	}, true
-}
-
-// SerializeTranscript converts transcript lines back to JSONL bytes.
-func SerializeTranscript(lines []TranscriptLine) ([]byte, error) {
-	var buf bytes.Buffer
-	for _, line := range lines {
-		data, err := json.Marshal(line)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal line: %w", err)
-		}
-		buf.Write(data)
-		buf.WriteByte('\n')
-	}
-	return buf.Bytes(), nil
 }
 
 // ExtractModifiedFiles extracts files modified by tool calls from transcript.

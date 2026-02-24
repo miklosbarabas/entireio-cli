@@ -550,7 +550,7 @@ func extractUserPrompts(agentType agent.AgentType, content string) []string {
 
 	// Droid has its own envelope format — use its parser to normalize first
 	if agentType == agent.AgentTypeFactoryAIDroid {
-		lines, err := factoryaidroid.ParseDroidTranscriptFromBytes([]byte(content))
+		lines, err := factoryaidroid.ParseDroidTranscriptFromBytes([]byte(content), 0)
 		if err != nil {
 			return nil
 		}
@@ -616,14 +616,13 @@ func calculateTokenUsage(agentType agent.AgentType, data []byte, startOffset int
 		return &agent.TokenUsage{}
 	}
 
-	// Droid has its own envelope format — use its parser to normalize first
+	// Droid has its own envelope format — use its parser to normalize first.
+	// startOffset is a raw JSONL line count, so pass it to the parser which
+	// applies the offset before filtering non-message entries.
 	if agentType == agent.AgentTypeFactoryAIDroid {
-		lines, err := factoryaidroid.ParseDroidTranscriptFromBytes(data)
+		lines, err := factoryaidroid.ParseDroidTranscriptFromBytes(data, startOffset)
 		if err != nil || len(lines) == 0 {
 			return &agent.TokenUsage{}
-		}
-		if startOffset > 0 && startOffset < len(lines) {
-			lines = lines[startOffset:]
 		}
 		return factoryaidroid.CalculateTokenUsage(lines)
 	}

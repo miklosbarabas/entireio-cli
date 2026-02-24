@@ -9,30 +9,6 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/transcript"
 )
 
-func TestSerializeTranscript(t *testing.T) {
-	t.Parallel()
-
-	lines := []TranscriptLine{
-		{Type: "user", UUID: "u1"},
-		{Type: "assistant", UUID: "a1"},
-	}
-
-	data, err := SerializeTranscript(lines)
-	if err != nil {
-		t.Fatalf("SerializeTranscript() error = %v", err)
-	}
-
-	// Parse back to verify round-trip
-	parsed, err := transcript.ParseFromBytes(data)
-	if err != nil {
-		t.Fatalf("ParseFromBytes(serialized) error = %v", err)
-	}
-
-	if len(parsed) != 2 {
-		t.Errorf("Round-trip got %d lines, want 2", len(parsed))
-	}
-}
-
 func TestParseDroidTranscript_NormalizesEnvelope(t *testing.T) {
 	t.Parallel()
 
@@ -43,7 +19,7 @@ func TestParseDroidTranscript_NormalizesEnvelope(t *testing.T) {
 			`{"type":"message","id":"m2","message":{"role":"assistant","content":[{"type":"text","text":"hi there"}]}}` + "\n",
 	)
 
-	lines, err := ParseDroidTranscriptFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data, 0)
 	if err != nil {
 		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
@@ -108,6 +84,67 @@ func TestParseDroidTranscript_StartLineOffset(t *testing.T) {
 	}
 }
 
+func TestParseDroidTranscriptFromBytes_StartLineSkipsNonMessageEntries(t *testing.T) {
+	t.Parallel()
+
+	// Transcript: session_start(0), message(1), session_event(2), message(3), message(4)
+	// Raw line indices:  0            1            2                3            4
+	data := []byte(
+		`{"type":"session_start","id":"s1"}` + "\n" +
+			`{"type":"message","id":"m1","message":{"role":"user","content":"hello"}}` + "\n" +
+			`{"type":"session_event","data":"some event"}` + "\n" +
+			`{"type":"message","id":"m2","message":{"role":"assistant","content":"hi"}}` + "\n" +
+			`{"type":"message","id":"m3","message":{"role":"user","content":"bye"}}` + "\n",
+	)
+
+	// With startLine=0, all 3 messages should be returned
+	allLines, err := ParseDroidTranscriptFromBytes(data, 0)
+	if err != nil {
+		t.Fatalf("ParseDroidTranscriptFromBytes(0) error = %v", err)
+	}
+	if len(allLines) != 3 {
+		t.Fatalf("startLine=0: got %d lines, want 3", len(allLines))
+	}
+
+	// With startLine=2, skip raw lines 0-1 (session_start + m1).
+	// Lines 2 (session_event) is skipped by filter, lines 3-4 (m2, m3) are messages.
+	fromLine2, err := ParseDroidTranscriptFromBytes(data, 2)
+	if err != nil {
+		t.Fatalf("ParseDroidTranscriptFromBytes(2) error = %v", err)
+	}
+	if len(fromLine2) != 2 {
+		t.Fatalf("startLine=2: got %d lines, want 2", len(fromLine2))
+	}
+	if fromLine2[0].UUID != "m2" {
+		t.Errorf("startLine=2: lines[0].UUID = %q, want \"m2\"", fromLine2[0].UUID)
+	}
+	if fromLine2[1].UUID != "m3" {
+		t.Errorf("startLine=2: lines[1].UUID = %q, want \"m3\"", fromLine2[1].UUID)
+	}
+
+	// With startLine=3, skip raw lines 0-2 (session_start + m1 + session_event).
+	// Lines 3-4 (m2, m3) are messages.
+	fromLine3, err := ParseDroidTranscriptFromBytes(data, 3)
+	if err != nil {
+		t.Fatalf("ParseDroidTranscriptFromBytes(3) error = %v", err)
+	}
+	if len(fromLine3) != 2 {
+		t.Fatalf("startLine=3: got %d lines, want 2", len(fromLine3))
+	}
+	if fromLine3[0].UUID != "m2" {
+		t.Errorf("startLine=3: lines[0].UUID = %q, want \"m2\"", fromLine3[0].UUID)
+	}
+
+	// With startLine beyond end, should return no lines
+	beyondEnd, err := ParseDroidTranscriptFromBytes(data, 100)
+	if err != nil {
+		t.Fatalf("ParseDroidTranscriptFromBytes(100) error = %v", err)
+	}
+	if len(beyondEnd) != 0 {
+		t.Fatalf("startLine=100: got %d lines, want 0", len(beyondEnd))
+	}
+}
+
 func TestParseDroidTranscript_RealDroidFormat(t *testing.T) {
 	t.Parallel()
 
@@ -120,7 +157,7 @@ func TestParseDroidTranscript_RealDroidFormat(t *testing.T) {
 			`{"type":"message","id":"msg-4","message":{"role":"assistant","content":[{"type":"text","text":"Done!"}]}}` + "\n",
 	)
 
-	lines, err := ParseDroidTranscriptFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data, 0)
 	if err != nil {
 		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
@@ -149,7 +186,7 @@ func TestExtractModifiedFiles(t *testing.T) {
 {"type":"message","id":"a4","message":{"role":"assistant","content":[{"type":"tool_use","name":"Write","input":{"file_path":"foo.go"}}]}}
 `)
 
-	lines, err := ParseDroidTranscriptFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data, 0)
 	if err != nil {
 		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
@@ -183,7 +220,7 @@ func TestExtractModifiedFiles_NotebookEdit(t *testing.T) {
 	data := []byte(`{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"NotebookEdit","input":{"notebook_path":"/repo/analysis.ipynb"}}]}}
 `)
 
-	lines, err := ParseDroidTranscriptFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data, 0)
 	if err != nil {
 		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
@@ -204,7 +241,7 @@ func TestExtractModifiedFiles_CreateAndMultiEdit(t *testing.T) {
 {"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"tool_use","name":"MultiEdit","input":{"file_path":"existing_file.go"}}]}}
 `)
 
-	lines, err := ParseDroidTranscriptFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data, 0)
 	if err != nil {
 		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
@@ -1100,7 +1137,7 @@ func TestParseDroidTranscript_MalformedLines(t *testing.T) {
 			`{"type":"session_event","data":"ignored"}` + "\n",
 	)
 
-	lines, err := ParseDroidTranscriptFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data, 0)
 	if err != nil {
 		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
