@@ -228,10 +228,12 @@ func runEnableInteractive(w io.Writer, agents []agent.Agent, opts EnableOptions)
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
-	if _, err := strategy.InstallGitHook(true, opts.LocalDev, opts.AbsoluteGitHookPath); err != nil {
+	// Use settings values (merged from existing config + flags) for hook installation
+	// This ensures re-running `entire enable` without flags preserves existing settings
+	if _, err := strategy.InstallGitHook(true, settings.LocalDev, settings.AbsoluteGitHookPath); err != nil {
 		return fmt.Errorf("failed to install git hooks: %w", err)
 	}
-	strategy.CheckAndWarnHookManagers(w, opts.LocalDev, opts.AbsoluteGitHookPath)
+	strategy.CheckAndWarnHookManagers(w, settings.LocalDev, settings.AbsoluteGitHookPath)
 	fmt.Fprintln(w, "✓ Hooks installed")
 
 	configDisplay := configDisplayProject
@@ -629,10 +631,12 @@ func setupAgentHooksNonInteractive(w io.Writer, ag agent.Agent, opts EnableOptio
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
-	if _, err := strategy.InstallGitHook(true, opts.LocalDev, opts.AbsoluteGitHookPath); err != nil {
+	// Use settings values (merged from existing config + flags) for hook installation
+	// This ensures re-running `entire enable --agent X` without flags preserves existing settings
+	if _, err := strategy.InstallGitHook(true, settings.LocalDev, settings.AbsoluteGitHookPath); err != nil {
 		return fmt.Errorf("failed to install git hooks: %w", err)
 	}
-	strategy.CheckAndWarnHookManagers(w, opts.LocalDev, opts.AbsoluteGitHookPath)
+	strategy.CheckAndWarnHookManagers(w, settings.LocalDev, settings.AbsoluteGitHookPath)
 
 	if installedHooks == 0 {
 		msg := fmt.Sprintf("Hooks for %s already installed", ag.Description())
