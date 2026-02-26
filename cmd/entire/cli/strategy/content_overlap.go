@@ -44,12 +44,8 @@ type overlapOpts struct {
 // content, using content-aware comparison to detect the "reverted and replaced" scenario.
 //
 // This is used in PostCommit to determine if a session has work in the commit.
-//
-// When called with pre-resolved trees (headTree, shadowTree, parentTree all non-nil),
-// no additional git reads are needed. When any tree is nil, it falls back to resolving
-// from the repository.
-func filesOverlapWithContent(repo *git.Repository, shadowBranchName string, headCommit *object.Commit, filesTouched []string, opts ...overlapOpts) bool {
-	logCtx := logging.WithComponent(context.Background(), "checkpoint")
+func filesOverlapWithContent(ctx context.Context, repo *git.Repository, shadowBranchName string, headCommit *object.Commit, filesTouched []string, opts ...overlapOpts) bool {
+	logCtx := logging.WithComponent(ctx, "checkpoint")
 
 	// Use pre-resolved trees if provided, otherwise resolve from repo.
 	var o overlapOpts
@@ -186,8 +182,8 @@ func filesOverlapWithContent(repo *git.Repository, shadowBranchName string, head
 // content match to detect the "reverted and replaced" scenario.
 //
 // This is used in PrepareCommitMsg for carry-forward scenarios.
-func stagedFilesOverlapWithContent(repo *git.Repository, shadowTree *object.Tree, stagedFiles, filesTouched []string) bool {
-	logCtx := logging.WithComponent(context.Background(), "checkpoint")
+func stagedFilesOverlapWithContent(ctx context.Context, repo *git.Repository, shadowTree *object.Tree, stagedFiles, filesTouched []string) bool {
+	logCtx := logging.WithComponent(ctx, "checkpoint")
 
 	// Build set of filesTouched for quick lookup
 	touchedSet := make(map[string]bool)
@@ -371,6 +367,7 @@ func hasOverlappingFiles(stagedFiles, filesTouched []string) bool {
 //
 // Falls back to file-level subtraction if shadow branch is unavailable.
 func filesWithRemainingAgentChanges(
+	ctx context.Context,
 	repo *git.Repository,
 	shadowBranchName string,
 	headCommit *object.Commit,
@@ -378,7 +375,7 @@ func filesWithRemainingAgentChanges(
 	committedFiles map[string]struct{},
 	opts ...overlapOpts,
 ) []string {
-	logCtx := logging.WithComponent(context.Background(), "checkpoint")
+	logCtx := logging.WithComponent(ctx, "checkpoint")
 
 	// Use pre-resolved trees if provided, otherwise resolve from repo.
 	var o overlapOpts
@@ -394,7 +391,7 @@ func filesWithRemainingAgentChanges(
 			logging.Debug(logCtx, "filesWithRemainingAgentChanges: failed to get commit tree, falling back to file subtraction",
 				slog.String("error", err.Error()),
 			)
-			return subtractFilesByName(filesTouched, committedFiles)
+			return subtractFilesByName(ctx, filesTouched, committedFiles)
 		}
 	}
 
@@ -407,7 +404,7 @@ func filesWithRemainingAgentChanges(
 				slog.String("branch", shadowBranchName),
 				slog.String("error", err.Error()),
 			)
-			return subtractFilesByName(filesTouched, committedFiles)
+			return subtractFilesByName(ctx, filesTouched, committedFiles)
 		}
 
 		shadowCommit, err := repo.CommitObject(shadowRef.Hash())
@@ -415,7 +412,7 @@ func filesWithRemainingAgentChanges(
 			logging.Debug(logCtx, "filesWithRemainingAgentChanges: failed to get shadow commit, falling back to file subtraction",
 				slog.String("error", err.Error()),
 			)
-			return subtractFilesByName(filesTouched, committedFiles)
+			return subtractFilesByName(ctx, filesTouched, committedFiles)
 		}
 
 		shadowTree, err = shadowCommit.Tree()
@@ -423,7 +420,7 @@ func filesWithRemainingAgentChanges(
 			logging.Debug(logCtx, "filesWithRemainingAgentChanges: failed to get shadow tree, falling back to file subtraction",
 				slog.String("error", err.Error()),
 			)
-			return subtractFilesByName(filesTouched, committedFiles)
+			return subtractFilesByName(ctx, filesTouched, committedFiles)
 		}
 	}
 
@@ -519,8 +516,8 @@ func workingTreeMatchesCommit(worktreeRoot, filePath string, commitHash plumbing
 
 // subtractFilesByName returns files from filesTouched that are NOT in committedFiles.
 // This is a fallback when content-aware comparison isn't possible.
-func subtractFilesByName(filesTouched []string, committedFiles map[string]struct{}) []string {
-	logCtx := logging.WithComponent(context.Background(), "checkpoint")
+func subtractFilesByName(ctx context.Context, filesTouched []string, committedFiles map[string]struct{}) []string {
+	logCtx := logging.WithComponent(ctx, "checkpoint")
 	logging.Debug(logCtx, "subtractFilesByName: ",
 		slog.Any("filesTouched", filesTouched),
 		slog.Any("committedFiles", committedFiles),

@@ -1,6 +1,7 @@
 package factoryaidroid
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,7 +38,7 @@ func (f *FactoryAIDroidAgent) HookNames() []string {
 
 // ParseHookEvent translates a Factory AI Droid hook into a normalized lifecycle Event.
 // Returns nil if the hook has no lifecycle significance.
-func (f *FactoryAIDroidAgent) ParseHookEvent(hookName string, stdin io.Reader) (*agent.Event, error) {
+func (f *FactoryAIDroidAgent) ParseHookEvent(_ context.Context, hookName string, stdin io.Reader) (*agent.Event, error) {
 	switch hookName {
 	case HookNameSessionStart:
 		return f.parseSessionStart(stdin)

@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,7 +40,7 @@ func benchPostCommitSingleSession(phase session.Phase) func(*testing.B) {
 			b.StartTimer()
 
 			s := &ManualCommitStrategy{}
-			if err := s.PostCommit(); err != nil {
+			if err := s.PostCommit(context.Background()); err != nil {
 				b.Fatalf("PostCommit: %v", err)
 			}
 		}
@@ -56,7 +57,7 @@ func benchPostCommitMultipleSessions(sessionCount int) func(*testing.B) {
 			b.StartTimer()
 
 			s := &ManualCommitStrategy{}
-			if err := s.PostCommit(); err != nil {
+			if err := s.PostCommit(context.Background()); err != nil {
 				b.Fatalf("PostCommit: %v", err)
 			}
 		}
@@ -156,7 +157,7 @@ func benchSetupPostCommitRepo(b *testing.B, phase session.Phase, sessionCount in
 
 		paths.ClearWorktreeRootCache()
 
-		if err := s.SaveStep(StepContext{
+		if err := s.SaveStep(context.Background(), StepContext{
 			SessionID:      sessionID,
 			ModifiedFiles:  modifiedFiles,
 			NewFiles:       []string{},
@@ -171,13 +172,13 @@ func benchSetupPostCommitRepo(b *testing.B, phase session.Phase, sessionCount in
 		}
 
 		// Set the session phase
-		state, err := s.loadSessionState(sessionID)
+		state, err := s.loadSessionState(context.Background(), sessionID)
 		if err != nil {
 			b.Fatalf("load state: %v", err)
 		}
 		state.Phase = phase
 		state.FilesTouched = modifiedFiles
-		if err := s.saveSessionState(state); err != nil {
+		if err := s.saveSessionState(context.Background(), state); err != nil {
 			b.Fatalf("save state: %v", err)
 		}
 	}

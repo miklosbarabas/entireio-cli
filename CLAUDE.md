@@ -13,7 +13,7 @@ This repo contains the CLI for Entire.
 - `entire/`: Main CLI entry point
 - `entire/cli`: CLI utilities and helpers
 - `entire/cli/commands`: actual command implementations
-- `entire/cli/agent`: agent implementations (Claude Code, Gemini CLI) - see [Agent Integration Checklist](docs/architecture/agent-integration-checklist.md) and [Agent Implementation Guide](docs/architecture/agent-guide.md)
+- `entire/cli/agent`: agent implementations (Claude Code, Gemini CLI, OpenCode, Cursor) - see [Agent Integration Checklist](docs/architecture/agent-integration-checklist.md) and [Agent Implementation Guide](docs/architecture/agent-guide.md)
 - `entire/cli/strategy`: strategy implementation (manual-commit) - see section below
 - `entire/cli/checkpoint`: checkpoint storage abstractions (temporary and committed)
 - `entire/cli/session`: session state management
@@ -63,9 +63,16 @@ E2E tests:
 
 - Use the `//go:build e2e` build tag
 - Located in `e2e/tests/`
-- Test real agent interactions (creating files, committing, checkpoints, rewind, resume)
-- Support multiple agents: Claude Code, Gemini CLI, OpenCode
 - See [`e2e/README.md`](e2e/README.md) for full documentation (structure, debugging, adding agents)
+- Test real agent interactions (Claude Code, Gemini CLI, OpenCode, or Cursor creating files, committing, etc.)
+- Validate checkpoint scenarios documented in `docs/architecture/checkpoint-scenarios.md`
+- Support multiple agents via `E2E_AGENT` env var (`claude-code`, `gemini`, `opencode`, `cursor`)
+
+**Environment variables:**
+
+- `E2E_AGENT` - Agent to test with (default: `claude-code`)
+- `E2E_CLAUDE_MODEL` - Claude model to use (default: `haiku` for cost efficiency)
+- `E2E_TIMEOUT` - Timeout per prompt (default: `2m`)
 
 ### Test Parallelization
 

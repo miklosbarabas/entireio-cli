@@ -1,6 +1,7 @@
 package factoryaidroid
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -45,10 +46,10 @@ var entireHookPrefixes = []string{
 // InstallHooks installs Factory AI Droid hooks in .factory/settings.json.
 // If force is true, removes existing Entire hooks before installing.
 // Returns the number of hooks installed.
-func (f *FactoryAIDroidAgent) InstallHooks(localDev bool, force bool) (int, error) {
+func (f *FactoryAIDroidAgent) InstallHooks(ctx context.Context, localDev bool, force bool) (int, error) {
 	// Use repo root instead of CWD to find .factory directory
 	// This ensures hooks are installed correctly when run from a subdirectory
-	repoRoot, err := paths.WorktreeRoot()
+	repoRoot, err := paths.WorktreeRoot(ctx)
 	if err != nil {
 		// Fallback to CWD if not in a git repo (e.g., during tests)
 		repoRoot, err = os.Getwd() //nolint:forbidigo // Intentional fallback when WorktreeRoot() fails (tests run outside git repos)
@@ -261,9 +262,9 @@ func marshalHookType(rawHooks map[string]json.RawMessage, hookType string, match
 }
 
 // UninstallHooks removes Entire hooks from Factory AI Droid settings.
-func (f *FactoryAIDroidAgent) UninstallHooks() error {
+func (f *FactoryAIDroidAgent) UninstallHooks(ctx context.Context) error {
 	// Use repo root to find .factory directory when run from a subdirectory
-	repoRoot, err := paths.WorktreeRoot()
+	repoRoot, err := paths.WorktreeRoot(ctx)
 	if err != nil {
 		repoRoot = "." // Fallback to CWD if not in a git repo
 	}
@@ -383,9 +384,9 @@ func (f *FactoryAIDroidAgent) UninstallHooks() error {
 }
 
 // AreHooksInstalled checks if Entire hooks are installed.
-func (f *FactoryAIDroidAgent) AreHooksInstalled() bool {
+func (f *FactoryAIDroidAgent) AreHooksInstalled(ctx context.Context) bool {
 	// Use repo root to find .factory directory when run from a subdirectory
-	repoRoot, err := paths.WorktreeRoot()
+	repoRoot, err := paths.WorktreeRoot(ctx)
 	if err != nil {
 		repoRoot = "." // Fallback to CWD if not in a git repo
 	}

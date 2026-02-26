@@ -48,7 +48,7 @@ func NewRootCmd() *cobra.Command {
 
 			// Load settings once for telemetry and version check
 			var telemetryEnabled *bool
-			settings, err := LoadEntireSettings()
+			settings, err := LoadEntireSettings(cmd.Context())
 			if err == nil {
 				telemetryEnabled = settings.Telemetry
 			}
@@ -56,14 +56,14 @@ func NewRootCmd() *cobra.Command {
 			// Check if telemetry is enabled
 			if telemetryEnabled != nil && *telemetryEnabled {
 				// Use detached tracking (non-blocking)
-				installedAgents := GetAgentsWithHooksInstalled()
+				installedAgents := GetAgentsWithHooksInstalled(cmd.Context())
 				agentStr := JoinAgentNames(installedAgents)
 				telemetry.TrackCommandDetached(cmd, agentStr, settings.Enabled, versioninfo.Version)
 			}
 
 			// Version check and notification (synchronous with 2s timeout)
 			// Runs AFTER command completes to avoid interfering with interactive modes
-			versioncheck.CheckAndNotify(cmd.OutOrStdout(), versioninfo.Version)
+			versioncheck.CheckAndNotify(cmd.Context(), cmd.OutOrStdout(), versioninfo.Version)
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()

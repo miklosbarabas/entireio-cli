@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,7 +58,7 @@ func TestFilesOverlapWithContent_ModifiedFile(t *testing.T) {
 
 	// Test: Modified file should count as overlap even with different content
 	shadowBranch := checkpoint.ShadowBranchNameForCommit("abc1234", "e3b0c4")
-	result := filesOverlapWithContent(repo, shadowBranch, commit, []string{"test.txt"})
+	result := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"test.txt"})
 	assert.True(t, result, "Modified file should count as overlap (user edited session's work)")
 }
 
@@ -94,7 +95,7 @@ func TestFilesOverlapWithContent_NewFile_ContentMatch(t *testing.T) {
 
 	// Test: New file with matching content should count as overlap
 	shadowBranch := checkpoint.ShadowBranchNameForCommit("def5678", "e3b0c4")
-	result := filesOverlapWithContent(repo, shadowBranch, commit, []string{"newfile.txt"})
+	result := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"newfile.txt"})
 	assert.True(t, result, "New file with matching content should count as overlap")
 }
 
@@ -131,7 +132,7 @@ func TestFilesOverlapWithContent_NewFile_ContentMismatch(t *testing.T) {
 
 	// Test: New file with different content should NOT count as overlap
 	shadowBranch := checkpoint.ShadowBranchNameForCommit("ghi9012", "e3b0c4")
-	result := filesOverlapWithContent(repo, shadowBranch, commit, []string{"replaced.txt"})
+	result := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"replaced.txt"})
 	assert.False(t, result, "New file with different content should NOT count as overlap (reverted & replaced)")
 }
 
@@ -170,11 +171,11 @@ func TestFilesOverlapWithContent_FileNotInCommit(t *testing.T) {
 
 	// Test: Only fileB in filesTouched, which is not in commit
 	shadowBranch := checkpoint.ShadowBranchNameForCommit("jkl3456", "e3b0c4")
-	result := filesOverlapWithContent(repo, shadowBranch, commit, []string{"fileB.txt"})
+	result := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"fileB.txt"})
 	assert.False(t, result, "File not in commit should not count as overlap")
 
 	// Test: fileA in filesTouched and in commit - should overlap (new file with matching content)
-	result = filesOverlapWithContent(repo, shadowBranch, commit, []string{"fileA.txt"})
+	result = filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"fileA.txt"})
 	assert.True(t, result, "File in commit with matching content should count as overlap")
 }
 
@@ -219,7 +220,7 @@ func TestFilesOverlapWithContent_DeletedFile(t *testing.T) {
 
 	// Test: deleted file in filesTouched should count as overlap
 	shadowBranch := checkpoint.ShadowBranchNameForCommit("del1234", "e3b0c4")
-	result := filesOverlapWithContent(repo, shadowBranch, commit, []string{"to_delete.txt"})
+	result := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"to_delete.txt"})
 	assert.True(t, result, "Deleted file should count as overlap (agent's deletion being committed)")
 }
 
@@ -247,7 +248,7 @@ func TestFilesOverlapWithContent_NoShadowBranch(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test: Non-existent shadow branch should fall back to assuming overlap
-	result := filesOverlapWithContent(repo, "entire/nonexistent-e3b0c4", commit, []string{"test.txt"})
+	result := filesOverlapWithContent(context.Background(), repo, "entire/nonexistent-e3b0c4", commit, []string{"test.txt"})
 	assert.True(t, result, "Missing shadow branch should fall back to assuming overlap")
 }
 
@@ -285,7 +286,7 @@ func TestFilesWithRemainingAgentChanges_FileNotCommitted(t *testing.T) {
 	committedFiles := map[string]struct{}{"fileA.txt": {}}
 
 	// fileB was not committed - should be in remaining
-	remaining := filesWithRemainingAgentChanges(repo, shadowBranch, commit, []string{"fileA.txt", "fileB.txt"}, committedFiles)
+	remaining := filesWithRemainingAgentChanges(context.Background(), repo, shadowBranch, commit, []string{"fileA.txt", "fileB.txt"}, committedFiles)
 	assert.Equal(t, []string{"fileB.txt"}, remaining, "Uncommitted file should be in remaining")
 }
 
@@ -324,7 +325,7 @@ func TestFilesWithRemainingAgentChanges_FullyCommitted(t *testing.T) {
 	committedFiles := map[string]struct{}{"test.txt": {}}
 
 	// File was fully committed - should NOT be in remaining
-	remaining := filesWithRemainingAgentChanges(repo, shadowBranch, commit, []string{"test.txt"}, committedFiles)
+	remaining := filesWithRemainingAgentChanges(context.Background(), repo, shadowBranch, commit, []string{"test.txt"}, committedFiles)
 	assert.Empty(t, remaining, "Fully committed file should not be in remaining")
 }
 
@@ -368,7 +369,7 @@ func TestFilesWithRemainingAgentChanges_PartialCommit(t *testing.T) {
 	committedFiles := map[string]struct{}{"test.txt": {}}
 
 	// Content doesn't match and working tree is dirty - file should be in remaining
-	remaining := filesWithRemainingAgentChanges(repo, shadowBranch, commit, []string{"test.txt"}, committedFiles)
+	remaining := filesWithRemainingAgentChanges(context.Background(), repo, shadowBranch, commit, []string{"test.txt"}, committedFiles)
 	assert.Equal(t, []string{"test.txt"}, remaining, "Partially committed file with dirty working tree should be in remaining")
 }
 
@@ -410,7 +411,7 @@ func TestFilesWithRemainingAgentChanges_ReplacedContent(t *testing.T) {
 	committedFiles := map[string]struct{}{"config.go": {}}
 
 	// Content differs from shadow but working tree is clean — no carry-forward
-	remaining := filesWithRemainingAgentChanges(repo, shadowBranch, commit, []string{"config.go"}, committedFiles)
+	remaining := filesWithRemainingAgentChanges(context.Background(), repo, shadowBranch, commit, []string{"config.go"}, committedFiles)
 	assert.Empty(t, remaining, "Replaced content with clean working tree should not be in remaining")
 }
 
@@ -439,7 +440,7 @@ func TestFilesWithRemainingAgentChanges_NoShadowBranch(t *testing.T) {
 
 	// Non-existent shadow branch should fall back to file-level subtraction
 	committedFiles := map[string]struct{}{"test.txt": {}}
-	remaining := filesWithRemainingAgentChanges(repo, "entire/nonexistent-e3b0c4", commit, []string{"test.txt", "other.txt"}, committedFiles)
+	remaining := filesWithRemainingAgentChanges(context.Background(), repo, "entire/nonexistent-e3b0c4", commit, []string{"test.txt", "other.txt"}, committedFiles)
 
 	// With file-level subtraction: test.txt is in committedFiles, other.txt is not
 	assert.Equal(t, []string{"other.txt"}, remaining, "Fallback should use file-level subtraction")
@@ -516,10 +517,10 @@ func TestFilesOverlapWithContent_CacheEquivalence(t *testing.T) {
 	headTree, parentTree, shadowTree := resolveCommitTrees(t, repo, commit, shadowBranch)
 
 	// Cache miss (no opts)
-	resultWithout := filesOverlapWithContent(repo, shadowBranch, commit, []string{"test.txt"})
+	resultWithout := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"test.txt"})
 
 	// Cache hit (all trees pre-resolved)
-	resultWith := filesOverlapWithContent(repo, shadowBranch, commit, []string{"test.txt"}, overlapOpts{
+	resultWith := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"test.txt"}, overlapOpts{
 		headTree:      headTree,
 		shadowTree:    shadowTree,
 		parentTree:    parentTree,
@@ -564,7 +565,7 @@ func TestFilesOverlapWithContent_PartialCache(t *testing.T) {
 	headTree, parentTree, _ := resolveCommitTrees(t, repo, commit, shadowBranch)
 
 	// Partial cache: headTree and parentTree provided, shadowTree nil (will be resolved from repo)
-	result := filesOverlapWithContent(repo, shadowBranch, commit, []string{"newfile.txt"}, overlapOpts{
+	result := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"newfile.txt"}, overlapOpts{
 		headTree:      headTree,
 		parentTree:    parentTree,
 		hasParentTree: true,
@@ -599,7 +600,7 @@ func TestFilesOverlapWithContent_CacheWithInitialCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Cache with hasParentTree=true and parentTree=nil (initial commit has no parent)
-	result := filesOverlapWithContent(repo, shadowBranch, commit, []string{"test.txt"}, overlapOpts{
+	result := filesOverlapWithContent(context.Background(), repo, shadowBranch, commit, []string{"test.txt"}, overlapOpts{
 		headTree:      headTree,
 		parentTree:    nil,
 		hasParentTree: true, // Explicitly resolved as nil (initial commit)
@@ -647,10 +648,10 @@ func TestFilesWithRemainingAgentChanges_CacheEquivalence(t *testing.T) {
 	filesTouched := []string{"fileA.txt", "fileB.txt"}
 
 	// Cache miss
-	resultWithout := filesWithRemainingAgentChanges(repo, shadowBranch, commit, filesTouched, committedFiles)
+	resultWithout := filesWithRemainingAgentChanges(context.Background(), repo, shadowBranch, commit, filesTouched, committedFiles)
 
 	// Cache hit
-	resultWith := filesWithRemainingAgentChanges(repo, shadowBranch, commit, filesTouched, committedFiles, overlapOpts{
+	resultWith := filesWithRemainingAgentChanges(context.Background(), repo, shadowBranch, commit, filesTouched, committedFiles, overlapOpts{
 		headTree:   headTree,
 		shadowTree: shadowTree,
 	})
@@ -695,7 +696,7 @@ func TestStagedFilesOverlapWithContent_ModifiedFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Modified file should count as overlap regardless of content
-	result := stagedFilesOverlapWithContent(repo, shadowTree, []string{"test.txt"}, []string{"test.txt"})
+	result := stagedFilesOverlapWithContent(context.Background(), repo, shadowTree, []string{"test.txt"}, []string{"test.txt"})
 	assert.True(t, result, "Modified file should always count as overlap")
 }
 
@@ -732,7 +733,7 @@ func TestStagedFilesOverlapWithContent_NewFile_ContentMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	// New file with matching content should count as overlap
-	result := stagedFilesOverlapWithContent(repo, shadowTree, []string{"newfile.txt"}, []string{"newfile.txt"})
+	result := stagedFilesOverlapWithContent(context.Background(), repo, shadowTree, []string{"newfile.txt"}, []string{"newfile.txt"})
 	assert.True(t, result, "New file with matching content should count as overlap")
 }
 
@@ -768,7 +769,7 @@ func TestStagedFilesOverlapWithContent_NewFile_ContentMismatch(t *testing.T) {
 	require.NoError(t, err)
 
 	// New file with different content should NOT count as overlap
-	result := stagedFilesOverlapWithContent(repo, shadowTree, []string{"newfile.txt"}, []string{"newfile.txt"})
+	result := stagedFilesOverlapWithContent(context.Background(), repo, shadowTree, []string{"newfile.txt"}, []string{"newfile.txt"})
 	assert.False(t, result, "New file with mismatched content should not count as overlap")
 }
 
@@ -804,7 +805,7 @@ func TestStagedFilesOverlapWithContent_NoOverlap(t *testing.T) {
 	require.NoError(t, err)
 
 	// Staged file "other.txt" is not in filesTouched "session.txt"
-	result := stagedFilesOverlapWithContent(repo, shadowTree, []string{"other.txt"}, []string{"session.txt"})
+	result := stagedFilesOverlapWithContent(context.Background(), repo, shadowTree, []string{"other.txt"}, []string{"session.txt"})
 	assert.False(t, result, "Non-overlapping files should return false")
 }
 
@@ -856,7 +857,7 @@ func TestStagedFilesOverlapWithContent_DeletedFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Deleted file SHOULD count as overlap - the agent's deletion is being committed
-	result := stagedFilesOverlapWithContent(repo, shadowTree, []string{"to_delete.txt"}, []string{"to_delete.txt"})
+	result := stagedFilesOverlapWithContent(context.Background(), repo, shadowTree, []string{"to_delete.txt"}, []string{"to_delete.txt"})
 	assert.True(t, result, "Deleted file should count as overlap (agent's deletion being committed)")
 }
 

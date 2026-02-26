@@ -2,6 +2,7 @@
 package factoryaidroid
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -54,8 +55,8 @@ func (f *FactoryAIDroidAgent) IsPreview() bool { return true }
 func (f *FactoryAIDroidAgent) ProtectedDirs() []string { return []string{".factory"} }
 
 // DetectPresence checks if Factory AI Droid is configured in the repository.
-func (f *FactoryAIDroidAgent) DetectPresence() (bool, error) {
-	repoRoot, err := paths.WorktreeRoot()
+func (f *FactoryAIDroidAgent) DetectPresence(ctx context.Context) (bool, error) {
+	repoRoot, err := paths.WorktreeRoot(ctx)
 	if err != nil {
 		repoRoot = "."
 	}
@@ -75,7 +76,7 @@ func (f *FactoryAIDroidAgent) ReadTranscript(sessionRef string) ([]byte, error) 
 }
 
 // ChunkTranscript splits a JSONL transcript at line boundaries.
-func (f *FactoryAIDroidAgent) ChunkTranscript(content []byte, maxSize int) ([][]byte, error) {
+func (f *FactoryAIDroidAgent) ChunkTranscript(_ context.Context, content []byte, maxSize int) ([][]byte, error) {
 	chunks, err := agent.ChunkJSONL(content, maxSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to chunk transcript: %w", err)
@@ -140,7 +141,7 @@ func (f *FactoryAIDroidAgent) ReadSession(input *agent.HookInput) (*agent.AgentS
 
 // WriteSession writes a session to Factory AI Droid's storage (JSONL transcript file).
 // Uses the NativeData field which contains raw JSONL bytes.
-func (f *FactoryAIDroidAgent) WriteSession(session *agent.AgentSession) error {
+func (f *FactoryAIDroidAgent) WriteSession(_ context.Context, session *agent.AgentSession) error {
 	if session == nil {
 		return errors.New("session is nil")
 	}

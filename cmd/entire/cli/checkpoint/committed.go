@@ -43,8 +43,6 @@ var errStopIteration = errors.New("stop iteration")
 //   - For incremental checkpoints: checkpoints/NNN-<tool-use-id>.json
 //   - For final checkpoints: checkpoint.json and agent-<agent-id>.jsonl
 func (s *GitStore) WriteCommitted(ctx context.Context, opts WriteCommittedOptions) error {
-	_ = ctx // Reserved for future use
-
 	// Validate identifiers to prevent path traversal and malformed data
 	if opts.CheckpointID.IsEmpty() {
 		return errors.New("invalid checkpoint options: checkpoint ID is required")
@@ -85,14 +83,14 @@ func (s *GitStore) WriteCommitted(ctx context.Context, opts WriteCommittedOption
 
 	// Handle task checkpoints
 	if opts.IsTask && opts.ToolUseID != "" {
-		taskMetadataPath, err = s.writeTaskCheckpointEntries(opts, basePath, entries)
+		taskMetadataPath, err = s.writeTaskCheckpointEntries(ctx, opts, basePath, entries)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Write standard checkpoint entries (transcript, prompts, context, metadata)
-	if err := s.writeStandardCheckpointEntries(opts, basePath, entries); err != nil {
+	if err := s.writeStandardCheckpointEntries(ctx, opts, basePath, entries); err != nil {
 		return err
 	}
 
@@ -177,13 +175,13 @@ func (s *GitStore) spliceCheckpointSubtree(rootTreeHash plumbing.Hash, checkpoin
 }
 
 // writeTaskCheckpointEntries writes task-specific checkpoint entries and returns the task metadata path.
-func (s *GitStore) writeTaskCheckpointEntries(opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) (string, error) {
+func (s *GitStore) writeTaskCheckpointEntries(ctx context.Context, opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) (string, error) {
 	taskPath := basePath + "tasks/" + opts.ToolUseID + "/"
 
 	if opts.IsIncremental {
 		return s.writeIncrementalTaskCheckpoint(opts, taskPath, entries)
 	}
-	return s.writeFinalTaskCheckpoint(opts, taskPath, entries)
+	return s.writeFinalTaskCheckpoint(ctx, opts, taskPath, entries)
 }
 
 // writeIncrementalTaskCheckpoint writes an incremental checkpoint file during task execution.
@@ -218,7 +216,7 @@ func (s *GitStore) writeIncrementalTaskCheckpoint(opts WriteCommittedOptions, ta
 }
 
 // writeFinalTaskCheckpoint writes the final checkpoint.json and subagent transcript.
-func (s *GitStore) writeFinalTaskCheckpoint(opts WriteCommittedOptions, taskPath string, entries map[string]object.TreeEntry) (string, error) {
+func (s *GitStore) writeFinalTaskCheckpoint(ctx context.Context, opts WriteCommittedOptions, taskPath string, entries map[string]object.TreeEntry) (string, error) {
 	checkpoint := taskCheckpointData{
 		SessionID:      opts.SessionID,
 		ToolUseID:      opts.ToolUseID,
@@ -249,7 +247,7 @@ func (s *GitStore) writeFinalTaskCheckpoint(opts WriteCommittedOptions, taskPath
 			// if the content is not valid JSONL (avoids silently dropping the transcript).
 			redacted, jsonlErr := redact.JSONLBytes(agentContent)
 			if jsonlErr != nil {
-				logging.Warn(context.Background(), "subagent transcript is not valid JSONL, falling back to plain redaction",
+				logging.Warn(ctx, "subagent transcript is not valid JSONL, falling back to plain redaction",
 					slog.String("path", opts.SubagentTranscriptPath),
 					slog.String("error", jsonlErr.Error()),
 				)
@@ -288,7 +286,7 @@ func (s *GitStore) writeFinalTaskCheckpoint(opts WriteCommittedOptions, taskPath
 //	│   └── content_hash.txt
 //	├── 2/                    # Second session
 //	└── ...
-func (s *GitStore) writeStandardCheckpointEntries(opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) error {
+func (s *GitStore) writeStandardCheckpointEntries(ctx context.Context, opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) error {
 	// Read existing summary to get current session count
 	var existingSummary *CheckpointSummary
 	metadataPath := basePath + paths.MetadataFileName
@@ -300,11 +298,11 @@ func (s *GitStore) writeStandardCheckpointEntries(opts WriteCommittedOptions, ba
 	}
 
 	// Determine session index: reuse existing slot if session ID matches, otherwise append
-	sessionIndex := s.findSessionIndex(basePath, existingSummary, entries, opts.SessionID)
+	sessionIndex := s.findSessionIndex(ctx, basePath, existingSummary, entries, opts.SessionID)
 
 	// Write session files to numbered subdirectory
 	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
-	sessionFilePaths, err := s.writeSessionToSubdirectory(opts, sessionPath, entries)
+	sessionFilePaths, err := s.writeSessionToSubdirectory(ctx, opts, sessionPath, entries)
 	if err != nil {
 		return err
 	}
@@ -332,7 +330,7 @@ func (s *GitStore) writeStandardCheckpointEntries(opts WriteCommittedOptions, ba
 
 // writeSessionToSubdirectory writes a single session's files to a numbered subdirectory.
 // Returns the absolute file paths from the git tree root for the sessions map.
-func (s *GitStore) writeSessionToSubdirectory(opts WriteCommittedOptions, sessionPath string, entries map[string]object.TreeEntry) (SessionFilePaths, error) {
+func (s *GitStore) writeSessionToSubdirectory(ctx context.Context, opts WriteCommittedOptions, sessionPath string, entries map[string]object.TreeEntry) (SessionFilePaths, error) {
 	filePaths := SessionFilePaths{}
 
 	// Clear any existing entries at this path so stale files from a previous
@@ -344,7 +342,7 @@ func (s *GitStore) writeSessionToSubdirectory(opts WriteCommittedOptions, sessio
 	}
 
 	// Write transcript
-	if err := s.writeTranscript(opts, sessionPath, entries); err != nil {
+	if err := s.writeTranscript(ctx, opts, sessionPath, entries); err != nil {
 		return filePaths, err
 	}
 	filePaths.Transcript = "/" + sessionPath + paths.TranscriptFileName
@@ -457,7 +455,7 @@ func (s *GitStore) writeCheckpointSummary(opts WriteCommittedOptions, basePath s
 
 // findSessionIndex returns the index of an existing session with the given ID,
 // or the next available index if not found. This prevents duplicate session entries.
-func (s *GitStore) findSessionIndex(basePath string, existingSummary *CheckpointSummary, entries map[string]object.TreeEntry, sessionID string) int {
+func (s *GitStore) findSessionIndex(ctx context.Context, basePath string, existingSummary *CheckpointSummary, entries map[string]object.TreeEntry, sessionID string) int {
 	if existingSummary == nil {
 		return 0
 	}
@@ -466,7 +464,7 @@ func (s *GitStore) findSessionIndex(basePath string, existingSummary *Checkpoint
 		if entry, exists := entries[path]; exists {
 			meta, err := s.readMetadataFromBlob(entry.Hash)
 			if err != nil {
-				logging.Warn(context.Background(), "failed to read session metadata during dedup check",
+				logging.Warn(ctx, "failed to read session metadata during dedup check",
 					slog.Int("session_index", i),
 					slog.String("session_id", sessionID),
 					slog.String("error", err.Error()),
@@ -558,7 +556,7 @@ func aggregateTokenUsage(a, b *agent.TokenUsage) *agent.TokenUsage {
 
 // writeTranscript writes the transcript file from in-memory content or file path.
 // If the transcript exceeds MaxChunkSize, it's split into multiple chunk files.
-func (s *GitStore) writeTranscript(opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) error {
+func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) error {
 	transcript := opts.Transcript
 	if len(transcript) == 0 && opts.TranscriptPath != "" {
 		var readErr error
@@ -579,7 +577,7 @@ func (s *GitStore) writeTranscript(opts WriteCommittedOptions, basePath string, 
 	}
 
 	// Chunk the transcript if it's too large
-	chunks, err := agent.ChunkTranscript(transcript, opts.Agent)
+	chunks, err := agent.ChunkTranscript(ctx, transcript, opts.Agent)
 	if err != nil {
 		return fmt.Errorf("failed to chunk transcript: %w", err)
 	}
@@ -820,7 +818,7 @@ func (s *GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Check
 	}
 
 	// Read transcript
-	if transcript, transcriptErr := readTranscriptFromTree(sessionTree, agentType); transcriptErr == nil && transcript != nil {
+	if transcript, transcriptErr := readTranscriptFromTree(ctx, sessionTree, agentType); transcriptErr == nil && transcript != nil {
 		result.Transcript = transcript
 	}
 
@@ -997,8 +995,8 @@ func (s *GitStore) GetTranscript(ctx context.Context, checkpointID id.Checkpoint
 // This is the primary method for looking up session logs by checkpoint ID.
 // Returns ErrCheckpointNotFound if the checkpoint doesn't exist.
 // Returns ErrNoTranscript if the checkpoint exists but has no transcript.
-func (s *GitStore) GetSessionLog(cpID id.CheckpointID) ([]byte, string, error) {
-	content, err := s.ReadLatestSessionContent(context.Background(), cpID)
+func (s *GitStore) GetSessionLog(ctx context.Context, cpID id.CheckpointID) ([]byte, string, error) {
+	content, err := s.ReadLatestSessionContent(ctx, cpID)
 	if err != nil {
 		if errors.Is(err, ErrCheckpointNotFound) {
 			return nil, "", ErrCheckpointNotFound
@@ -1016,13 +1014,13 @@ func (s *GitStore) GetSessionLog(cpID id.CheckpointID) ([]byte, string, error) {
 // don't already have a GitStore instance.
 // Returns ErrCheckpointNotFound if the checkpoint doesn't exist.
 // Returns ErrNoTranscript if the checkpoint exists but has no transcript.
-func LookupSessionLog(cpID id.CheckpointID) ([]byte, string, error) {
+func LookupSessionLog(ctx context.Context, cpID id.CheckpointID) ([]byte, string, error) {
 	repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to open git repository: %w", err)
 	}
 	store := NewGitStore(repo)
-	return store.GetSessionLog(cpID)
+	return store.GetSessionLog(ctx, cpID)
 }
 
 // UpdateSummary updates the summary field in the latest session's metadata.
@@ -1193,7 +1191,7 @@ func (s *GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOpti
 		if err != nil {
 			return fmt.Errorf("failed to redact transcript secrets: %w", err)
 		}
-		if err := s.replaceTranscript(transcript, opts.Agent, sessionPath, entries); err != nil {
+		if err := s.replaceTranscript(ctx, transcript, opts.Agent, sessionPath, entries); err != nil {
 			return fmt.Errorf("failed to replace transcript: %w", err)
 		}
 	}
@@ -1249,7 +1247,7 @@ func (s *GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOpti
 
 // replaceTranscript writes the full transcript content, replacing any existing transcript.
 // Also removes any chunk files from a previous write and updates the content hash.
-func (s *GitStore) replaceTranscript(transcript []byte, agentType agent.AgentType, sessionPath string, entries map[string]object.TreeEntry) error {
+func (s *GitStore) replaceTranscript(ctx context.Context, transcript []byte, agentType agent.AgentType, sessionPath string, entries map[string]object.TreeEntry) error {
 	// Remove existing transcript files (base + any chunks)
 	transcriptBase := sessionPath + paths.TranscriptFileName
 	for key := range entries {
@@ -1259,7 +1257,7 @@ func (s *GitStore) replaceTranscript(transcript []byte, agentType agent.AgentTyp
 	}
 
 	// Chunk the transcript (matches writeTranscript behavior)
-	chunks, err := agent.ChunkTranscript(transcript, agentType)
+	chunks, err := agent.ChunkTranscript(ctx, transcript, agentType)
 	if err != nil {
 		return fmt.Errorf("failed to chunk transcript: %w", err)
 	}
@@ -1522,7 +1520,7 @@ func GetGitAuthorFromRepo(repo *git.Repository) (name, email string) {
 // readTranscriptFromTree reads a transcript from a git tree, handling both chunked and non-chunked formats.
 // It checks for chunk files first (.001, .002, etc.), then falls back to the base file.
 // The agentType is used for reassembling chunks in the correct format.
-func readTranscriptFromTree(tree *object.Tree, agentType agent.AgentType) ([]byte, error) {
+func readTranscriptFromTree(ctx context.Context, tree *object.Tree, agentType agent.AgentType) ([]byte, error) {
 	// Collect all transcript-related files
 	var chunkFiles []string
 	var hasBaseFile bool
@@ -1556,7 +1554,7 @@ func readTranscriptFromTree(tree *object.Tree, agentType agent.AgentType) ([]byt
 		for _, chunkFile := range chunkFiles {
 			file, err := tree.File(chunkFile)
 			if err != nil {
-				logging.Warn(context.Background(), "failed to read transcript chunk file from tree",
+				logging.Warn(ctx, "failed to read transcript chunk file from tree",
 					slog.String("chunk_file", chunkFile),
 					slog.String("error", err.Error()),
 				)
@@ -1564,7 +1562,7 @@ func readTranscriptFromTree(tree *object.Tree, agentType agent.AgentType) ([]byt
 			}
 			content, err := file.Contents()
 			if err != nil {
-				logging.Warn(context.Background(), "failed to read transcript chunk contents",
+				logging.Warn(ctx, "failed to read transcript chunk contents",
 					slog.String("chunk_file", chunkFile),
 					slog.String("error", err.Error()),
 				)

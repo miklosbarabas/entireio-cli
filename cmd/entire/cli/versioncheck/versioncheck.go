@@ -19,7 +19,7 @@ import (
 // CheckAndNotify performs a version check and notifies the user if a newer version is available.
 // This is the main entry point for the version check system.
 // The function is silent on all errors to avoid interrupting CLI operations.
-func CheckAndNotify(w io.Writer, currentVersion string) {
+func CheckAndNotify(ctx context.Context, w io.Writer, currentVersion string) {
 	// Skip checks for dev builds
 	if currentVersion == "dev" || currentVersion == "" {
 		return
@@ -43,17 +43,17 @@ func CheckAndNotify(w io.Writer, currentVersion string) {
 	}
 
 	// Fetch the latest version from GitHub API
-	latestVersion, err := fetchLatestVersion()
+	latestVersion, err := fetchLatestVersion(ctx)
 
 	// Always update cache to avoid retrying on every CLI invocation
 	cache.LastCheckTime = time.Now()
 	if saveErr := saveCache(cache); saveErr != nil {
-		logging.Debug(context.Background(), "version check: failed to save cache",
+		logging.Debug(ctx, "version check: failed to save cache",
 			"error", saveErr.Error())
 	}
 
 	if err != nil {
-		logging.Debug(context.Background(), "version check: failed to fetch latest version",
+		logging.Debug(ctx, "version check: failed to fetch latest version",
 			"error", err.Error())
 		return
 	}
@@ -160,9 +160,9 @@ func saveCache(cache *VersionCache) error {
 
 // fetchLatestVersion fetches the latest version from the GitHub API.
 // Returns a timeout-safe version check using the configured HTTP timeout.
-func fetchLatestVersion() (string, error) {
+func fetchLatestVersion(ctx context.Context) (string, error) {
 	// Create a context with timeout for the HTTP request
-	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubAPIURL, nil)
