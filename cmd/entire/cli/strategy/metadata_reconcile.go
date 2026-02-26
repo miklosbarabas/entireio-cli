@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,17 +29,21 @@ func ReconcileDisconnectedMetadataBranch(repo *git.Repository) error {
 
 	// Check local branch
 	localRef, err := repo.Reference(refName, true)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return nil // No local branch — nothing to reconcile
+	}
 	if err != nil {
-		// No local branch — nothing to reconcile
-		return nil //nolint:nilerr // expected case
+		return fmt.Errorf("failed to check local metadata branch: %w", err)
 	}
 
 	// Check remote-tracking branch
 	remoteRefName := plumbing.NewRemoteReferenceName("origin", paths.MetadataBranchName)
 	remoteRef, err := repo.Reference(remoteRefName, true)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return nil // No remote branch — nothing to reconcile
+	}
 	if err != nil {
-		// No remote branch — nothing to reconcile
-		return nil //nolint:nilerr // expected case
+		return fmt.Errorf("failed to check remote metadata branch: %w", err)
 	}
 
 	localHash := localRef.Hash()
