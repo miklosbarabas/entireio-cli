@@ -18,7 +18,18 @@ var (
 	_ agent.TranscriptAnalyzer     = (*FactoryAIDroidAgent)(nil)
 	_ agent.TokenCalculator        = (*FactoryAIDroidAgent)(nil)
 	_ agent.SubagentAwareExtractor = (*FactoryAIDroidAgent)(nil)
+	_ agent.HookResponseWriter     = (*FactoryAIDroidAgent)(nil)
 )
+
+// WriteHookResponse outputs the hook response as plain text to stdout.
+// Factory AI Droid does not parse the JSON systemMessage protocol,
+// so we write plain text that it displays directly in the terminal.
+func (f *FactoryAIDroidAgent) WriteHookResponse(message string) error {
+	if _, err := fmt.Fprintln(os.Stdout, message); err != nil {
+		return fmt.Errorf("failed to write hook response: %w", err)
+	}
+	return nil
+}
 
 // HookNames returns the hook verbs Factory AI Droid supports.
 // These become subcommands: entire hooks factoryai-droid <verb>
