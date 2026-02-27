@@ -270,7 +270,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	if len(allPrompts) > 0 {
 		lastPrompt = allPrompts[len(allPrompts)-1]
 	}
-	commitMessage := generateCommitMessage(lastPrompt)
+	commitMessage := generateCommitMessage(lastPrompt, ag.Type())
 	fmt.Fprintf(os.Stderr, "Using commit message: %s\n", commitMessage)
 
 	// Get worktree root for path normalization
