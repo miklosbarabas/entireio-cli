@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/session"
 )
@@ -76,7 +77,7 @@ type RewindPoint struct {
 
 	// Agent is the human-readable name of the agent that created this checkpoint
 	// (e.g., "Claude Code", "Cursor")
-	Agent agent.AgentType
+	Agent types.AgentType
 
 	// SessionID is the session identifier for this checkpoint.
 	// Used to distinguish checkpoints from different concurrent sessions.
@@ -153,7 +154,7 @@ type StepContext struct {
 	AuthorEmail string
 
 	// AgentType is the human-readable agent name (e.g., "Claude Code", "Cursor")
-	AgentType agent.AgentType
+	AgentType types.AgentType
 
 	// Transcript position at step/turn start - tracks what was added during this step
 	StepTranscriptIdentifier string // Last identifier when step started (UUID for Claude, message ID for Gemini)
@@ -238,7 +239,7 @@ type TaskStepContext struct {
 	TodoContent string
 
 	// AgentType is the human-readable agent name (e.g., "Claude Code", "Cursor")
-	AgentType agent.AgentType
+	AgentType types.AgentType
 }
 
 // TaskCheckpoint contains the checkpoint information written to checkpoint.json
@@ -364,7 +365,7 @@ type Strategy interface {
 	// agentType is the human-readable name of the agent (e.g., "Claude Code").
 	// transcriptPath is the path to the live transcript file (for mid-session commit detection).
 	// userPrompt is the user's prompt text (stored truncated as FirstPrompt for display).
-	InitializeSession(ctx context.Context, sessionID string, agentType agent.AgentType, transcriptPath string, userPrompt string) error
+	InitializeSession(ctx context.Context, sessionID string, agentType types.AgentType, transcriptPath string, userPrompt string) error
 	// PrepareCommitMsg is called by the git prepare-commit-msg hook.
 	// It can modify the commit message file to add trailers, etc.
 	// The source parameter indicates how the commit was initiated:
@@ -427,7 +428,7 @@ type Strategy interface {
 // per-session resume commands without re-reading the metadata tree.
 type RestoredSession struct {
 	SessionID string
-	Agent     agent.AgentType
+	Agent     types.AgentType
 	Prompt    string
 	CreatedAt time.Time // From session metadata; used by resume to determine most recent
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
@@ -1801,7 +1802,7 @@ func TestSaveStep_UsesCtxAgentType_WhenPartialState(t *testing.T) {
 func TestCountTranscriptItems(t *testing.T) {
 	tests := []struct {
 		name      string
-		agentType agent.AgentType
+		agentType types.AgentType
 		content   string
 		expected  int
 	}{
@@ -1896,7 +1897,7 @@ func TestCountTranscriptItems(t *testing.T) {
 func TestExtractUserPrompts(t *testing.T) {
 	tests := []struct {
 		name      string
-		agentType agent.AgentType
+		agentType types.AgentType
 		content   string
 		expected  []string
 	}{
