@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
 
@@ -38,10 +39,10 @@ func NewFactoryAIDroidAgent() agent.Agent {
 }
 
 // Name returns the agent registry key.
-func (f *FactoryAIDroidAgent) Name() agent.AgentName { return agent.AgentNameFactoryAIDroid }
+func (f *FactoryAIDroidAgent) Name() types.AgentName { return agent.AgentNameFactoryAIDroid }
 
 // Type returns the agent type identifier.
-func (f *FactoryAIDroidAgent) Type() agent.AgentType { return agent.AgentTypeFactoryAIDroid }
+func (f *FactoryAIDroidAgent) Type() types.AgentType { return agent.AgentTypeFactoryAIDroid }
 
 // Description returns a human-readable description.
 func (f *FactoryAIDroidAgent) Description() string {

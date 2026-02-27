@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 
 	// Register agents so GetByAgentType works in tests.
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode"
@@ -17,12 +18,12 @@ import (
 
 // calculateTokenUsage is a test helper that looks up the Factory AI Droid agent
 // and calculates token usage from pre-loaded transcript bytes.
-func calculateTokenUsage(_ agent.AgentType, data []byte, offset int) *agent.TokenUsage {
+func calculateTokenUsage(_ types.AgentType, data []byte, offset int) *agent.TokenUsage {
 	ag, err := agent.GetByAgentType(agent.AgentTypeFactoryAIDroid)
 	if err != nil {
 		return nil
 	}
-	return agent.CalculateTokenUsage(ag, data, offset, "")
+	return agent.CalculateTokenUsage(context.Background(), ag, data, offset, "")
 }
 
 func TestCalculateTokenUsage_CursorReturnsNil(t *testing.T) {
