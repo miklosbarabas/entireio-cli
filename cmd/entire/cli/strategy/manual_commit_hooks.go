@@ -782,7 +782,7 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 	for _, state := range sessions {
 		// Skip fully-condensed ended sessions — no work remains.
 		// These sessions only persist for LastCheckpointID (amend trailer reuse).
-		if state.FullyCondensed {
+		if state.FullyCondensed && state.Phase == session.PhaseEnded {
 			continue
 		}
 		s.postCommitProcessSession(ctx, repo, state, &transitionCtx, checkpointID,
@@ -1105,6 +1105,10 @@ func (s *ManualCommitStrategy) filterSessionsWithNewContent(ctx context.Context,
 	var result []*SessionState
 
 	for _, state := range sessions {
+		// Skip fully-condensed ended sessions — no new content possible.
+		if state.FullyCondensed && state.Phase == session.PhaseEnded {
+			continue
+		}
 		hasNew, err := s.sessionHasNewContent(ctx, repo, state)
 		if err != nil {
 			// On error, include the session (fail open for hooks)
