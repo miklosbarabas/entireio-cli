@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+permissions:
+  actions: read
+  contents: read
+
 # Concurrency: only one E2E job runs at a time
 concurrency:
   group: e2e-tests
@@ -81,7 +85,7 @@ jobs:
           echo "agents=$failed" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack of E2E failure
-        uses: slackapi/slack-github-action@v2.1.1
+        uses: slackapi/slack-github-action@91efab103c0de0a537f72a35f6b8cda0ee76bf0a # v2.1.1
         with:
           webhook: ${{ secrets.E2E_SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
