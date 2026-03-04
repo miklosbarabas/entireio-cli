@@ -81,7 +81,7 @@ Checks whether the agent is present/usable in the current environment.
 
 Extracts the session ID from a hook input event.
 
-**Input (stdin):** JSON — the HookInput object
+**Input (stdin):** JSON — the [HookInput object](#hookinput-object)
 
 **Output (stdout):** JSON
 
@@ -120,14 +120,21 @@ Resolves the session file path from a session directory and ID.
 
 Reads session data from a hook input event.
 
-**Input (stdin):** JSON — the HookInput object
+**Input (stdin):** JSON — the [HookInput object](#hookinput-object)
 
-**Output (stdout):** JSON — AgentSession object
+**Output (stdout):** JSON — [AgentSession object](#agentsession-object)
 
 ```json
 {
   "session_id": "abc123",
-  "session_file": "/path/to/file.jsonl"
+  "agent_name": "cursor",
+  "repo_path": "/path/to/repo",
+  "session_ref": "/path/to/file.jsonl",
+  "start_time": "2026-01-13T12:00:00Z",
+  "native_data": null,
+  "modified_files": ["src/main.go"],
+  "new_files": [],
+  "deleted_files": []
 }
 ```
 
@@ -135,7 +142,7 @@ Reads session data from a hook input event.
 
 Writes/updates session data.
 
-**Input (stdin):** JSON — the AgentSession object
+**Input (stdin):** JSON — the [AgentSession object](#agentsession-object)
 
 **Output:** Exit 0 on success.
 
@@ -201,7 +208,7 @@ Parses a raw agent hook payload into a structured event.
 
 **Input (stdin):** Raw agent hook payload bytes.
 
-**Output (stdout):** JSON — the parsed event, or `null` if the payload is not relevant.
+**Output (stdout):** JSON — the parsed [Event object](#event-object), or `null` if the payload is not relevant.
 
 #### `install-hooks [--local-dev] [--force]`
 
@@ -265,8 +272,10 @@ Extracts the list of files modified by the agent from a transcript.
 **Output (stdout):** JSON
 
 ```json
-{"files": ["path/to/file1.go", "path/to/file2.go"]}
+{"files": ["path/to/file1.go", "path/to/file2.go"], "current_position": 12345}
 ```
+
+The `current_position` field returns the transcript position after extraction, allowing the caller to resume from that point on subsequent calls.
 
 #### `extract-prompts --session-ref <path> --offset <n>`
 
@@ -324,8 +333,17 @@ Calculates token usage from a transcript.
 **Output (stdout):** JSON
 
 ```json
-{"input_tokens": 1500, "output_tokens": 500}
+{
+  "input_tokens": 1500,
+  "cache_creation_tokens": 0,
+  "cache_read_tokens": 200,
+  "output_tokens": 500,
+  "api_call_count": 3,
+  "subagent_tokens": null
+}
 ```
+
+Only `input_tokens` and `output_tokens` are required. The optional fields (`cache_creation_tokens`, `cache_read_tokens`, `api_call_count`) default to `0` if omitted. `subagent_tokens` is an optional nested object with the same structure, for agents that spawn subagents.
 
 ### Capability: `text_generator`
 
@@ -392,8 +410,126 @@ Calculates total token usage across main transcript and subagent transcripts.
 **Output (stdout):** JSON
 
 ```json
-{"input_tokens": 5000, "output_tokens": 2000}
+{
+  "input_tokens": 5000,
+  "cache_creation_tokens": 0,
+  "cache_read_tokens": 1000,
+  "output_tokens": 2000,
+  "api_call_count": 8,
+  "subagent_tokens": {
+    "input_tokens": 2000,
+    "output_tokens": 800
+  }
+}
 ```
+
+Same token usage format as `calculate-tokens`. The `subagent_tokens` field aggregates usage from all subagents.
+
+## Shared Object Definitions
+
+### HookInput Object
+
+The HookInput object is passed via stdin to `get-session-id` and `read-session`.
+
+```json
+{
+  "hook_type": "stop",
+  "session_id": "abc123",
+  "session_ref": "/path/to/transcript.jsonl",
+  "timestamp": "2026-01-13T12:00:00Z",
+  "user_prompt": "Fix the login bug",
+  "tool_name": "Write",
+  "tool_use_id": "toolu_abc123",
+  "tool_input": {"path": "/src/main.go"},
+  "raw_data": {"custom_field": "value"}
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `hook_type` | string | Hook type: `session_start`, `session_end`, `user_prompt_submit`, `stop`, `pre_tool_use`, `post_tool_use` |
+| `session_id` | string | Agent session identifier |
+| `session_ref` | string | Agent-specific session reference (typically a file path) |
+| `timestamp` | string | RFC 3339 timestamp |
+| `user_prompt` | string | User's prompt text (from `user_prompt_submit` hooks). Optional. |
+| `tool_name` | string | Tool name (from `pre_tool_use`/`post_tool_use` hooks). Optional. |
+| `tool_use_id` | string | Tool invocation ID. Optional. |
+| `tool_input` | object | Raw tool input JSON. Optional. |
+| `raw_data` | object | Agent-specific data for extension. Optional. |
+
+### AgentSession Object
+
+Used as input to `write-session` and output from `read-session`.
+
+```json
+{
+  "session_id": "abc123",
+  "agent_name": "cursor",
+  "repo_path": "/path/to/repo",
+  "session_ref": "/path/to/transcript.jsonl",
+  "start_time": "2026-01-13T12:00:00Z",
+  "native_data": null,
+  "modified_files": ["src/main.go"],
+  "new_files": ["src/new_file.go"],
+  "deleted_files": []
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | string | Agent session identifier |
+| `agent_name` | string | Agent registry name |
+| `repo_path` | string | Absolute path to the repository |
+| `session_ref` | string | Path/reference to session in agent's storage |
+| `start_time` | string | RFC 3339 timestamp of session start |
+| `native_data` | bytes/null | Session content in agent's native format (opaque to CLI) |
+| `modified_files` | string[] | Files modified during the session |
+| `new_files` | string[] | Files created during the session |
+| `deleted_files` | string[] | Files deleted during the session |
+
+### Event Object
+
+Returned by `parse-hook`. Represents a normalized lifecycle event.
+
+```json
+{
+  "type": 3,
+  "session_id": "abc123",
+  "session_ref": "/path/to/transcript.jsonl",
+  "prompt": "Fix the login bug",
+  "model": "claude-sonnet-4-20250514",
+  "timestamp": "2026-01-13T12:00:00Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | int | **Required.** Event type (see table below) |
+| `session_id` | string | **Required.** Agent session identifier |
+| `previous_session_id` | string | Non-empty when this event represents a session continuation/handoff. Optional. |
+| `session_ref` | string | Agent-specific transcript reference. Optional. |
+| `prompt` | string | User's prompt text (on `TurnStart` events). Optional. |
+| `model` | string | LLM model identifier. Optional. |
+| `timestamp` | string | RFC 3339 timestamp. Optional. |
+| `tool_use_id` | string | Tool invocation ID (for `SubagentStart`/`SubagentEnd`). Optional. |
+| `subagent_id` | string | Subagent instance ID (for `SubagentEnd`). Optional. |
+| `tool_input` | object | Raw tool input JSON (for subagent type/description extraction). Optional. |
+| `subagent_type` | string | Kind of subagent (for `SubagentStart`/`SubagentEnd`). Optional. |
+| `task_description` | string | Subagent task description. Optional. |
+| `response_message` | string | Message to display to the user via the agent. Optional. |
+| `metadata` | object | Agent-specific state preserved across events. Optional. |
+
+**Event types:**
+
+| Value | Name | Description |
+|---|---|---|
+| 1 | SessionStart | Agent session has begun |
+| 2 | TurnStart | User submitted a prompt, agent is about to work |
+| 3 | TurnEnd | Agent finished responding to a prompt |
+| 4 | Compaction | Agent is compressing its context window (triggers save + offset reset) |
+| 5 | SessionEnd | Session has been terminated |
+| 6 | SubagentStart | A subagent (task) has been spawned |
+| 7 | SubagentEnd | A subagent (task) has completed |
 
 ## Error Handling
 
