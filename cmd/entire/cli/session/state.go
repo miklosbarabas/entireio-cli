@@ -132,6 +132,12 @@ type State struct {
 	// Token usage tracking (accumulated across all checkpoints in this session)
 	TokenUsage *agent.TokenUsage `json:"token_usage,omitempty"`
 
+	// Hook-provided session metrics (for agents like Cursor that report via hooks)
+	SessionDurationMs int64 `json:"session_duration_ms,omitempty"`
+	SessionTurnCount  int   `json:"session_turn_count,omitempty"`
+	ContextTokens     int   `json:"context_tokens,omitempty"`
+	ContextWindowSize int   `json:"context_window_size,omitempty"`
+
 	// Deprecated: TranscriptLinesAtStart is replaced by CheckpointTranscriptStart.
 	// Kept for backward compatibility with existing state files.
 	TranscriptLinesAtStart int `json:"transcript_lines_at_start,omitempty"`
@@ -225,11 +231,17 @@ func (s *State) NormalizeAfterLoad(ctx context.Context) {
 	}
 }
 
-// IsStale returns true when the last time a session saw interaction exceeds StaleSessionThreshold.
-// If LastInteractionTime isn't set, we don't consider a session stale to avoid aggressively
-// deleting things.
+// IsStale returns true when a session hasn't seen interaction for longer than
+// StaleSessionThreshold. Falls back to StartedAt when LastInteractionTime is
+// nil (sessions created before interaction tracking was added).
 func (s *State) IsStale() bool {
-	return s.LastInteractionTime != nil && time.Since(*s.LastInteractionTime) > StaleSessionThreshold
+	var since time.Duration
+	if s.LastInteractionTime != nil {
+		since = time.Since(*s.LastInteractionTime)
+	} else {
+		since = time.Since(s.StartedAt)
+	}
+	return since > StaleSessionThreshold
 }
 
 // StateStore provides low-level operations for managing session state files.

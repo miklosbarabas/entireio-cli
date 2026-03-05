@@ -468,6 +468,10 @@ func detectOrSelectAgent(ctx context.Context, w io.Writer, selectFn func(availab
 		if _, ok := ag.(agent.HookSupport); !ok {
 			continue
 		}
+		// Skip test-only agents (e.g., Vogon canary)
+		if to, ok := ag.(agent.TestOnly); ok && to.IsTestOnly() {
+			continue
+		}
 		opt := huh.NewOption(string(ag.Type()), string(name))
 		if _, isPreSelected := preSelectedSet[name]; isPreSelected {
 			opt = opt.Selected(true)
