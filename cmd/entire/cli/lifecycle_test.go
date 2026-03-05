@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -440,7 +441,22 @@ func TestResolveTranscriptOffset_ZeroOffsetInPrePromptState(t *testing.T) {
 // --- Event type routing tests ---
 
 func TestDispatchLifecycleEvent_RoutesToCorrectHandler(t *testing.T) {
-	t.Parallel()
+	// NOT parallel: uses t.Chdir to isolate from real repo state.
+	// Without this, the SubagentEnd case creates .git/entire-sessions/test.json
+	// in the real repo whenever untracked files exist, because DetectFileChanges
+	// reports them as new files and SaveTaskStep falls back to initializeSession.
+	tmpDir := t.TempDir()
+	cmd := exec.CommandContext(context.Background(), "git", "init")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+	cmd = exec.CommandContext(context.Background(), "git", "commit", "--allow-empty", "-m", "init")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+	t.Chdir(tmpDir)
 
 	// Test that each event type is routed (we can't easily verify which handler
 	// was called without dependency injection, but we can verify no panic and
@@ -515,8 +531,6 @@ func TestDispatchLifecycleEvent_RoutesToCorrectHandler(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
 			ag := newMockAgent()
 			event := &agent.Event{
 				Type:      tc.eventType,
