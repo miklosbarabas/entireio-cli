@@ -234,23 +234,10 @@ func getMetadataTree(ctx context.Context, repo *git.Repository) (*object.Tree, e
 	return remoteTree, nil
 }
 
-// collectCheckpointsByAge reads metadata for each checkpoint ID from the tree,
-// skips any that can't be read, and returns them sorted by CreatedAt ascending.
-// Sorting ensures the newest checkpoint is restored last and wins on disk,
-// regardless of trailer order in the commit message.
+// collectCheckpointsByAge delegates to strategy.CollectCheckpointsByAge.
+// Kept as a local wrapper for call-site brevity.
 func collectCheckpointsByAge(tree *object.Tree, checkpointIDs []id.CheckpointID) []*strategy.CheckpointInfo {
-	var checkpoints []*strategy.CheckpointInfo
-	for _, cpID := range checkpointIDs {
-		metadata, err := strategy.ReadCheckpointMetadata(tree, cpID.Path())
-		if err != nil {
-			continue
-		}
-		checkpoints = append(checkpoints, metadata)
-	}
-	sort.Slice(checkpoints, func(i, j int) bool {
-		return checkpoints[i].CreatedAt.Before(checkpoints[j].CreatedAt)
-	})
-	return checkpoints
+	return strategy.CollectCheckpointsByAge(tree, checkpointIDs)
 }
 
 // branchCheckpointsResult contains the result of searching for checkpoints on a branch.

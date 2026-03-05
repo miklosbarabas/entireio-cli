@@ -188,13 +188,15 @@ func (s *ManualCommitStrategy) GetLogsOnlyRewindPoints(ctx context.Context, limi
 		}
 		count++
 
-		// Extract checkpoint ID from Entire-Checkpoint trailer (ParseCheckpoint validates format)
-		cpID, found := trailers.ParseCheckpoint(c.Message)
-		if !found {
+		// Extract all checkpoint IDs from Entire-Checkpoint trailers.
+		// Squash merge commits may contain multiple trailers from the original commits.
+		allCpIDs := trailers.ParseAllCheckpoints(c.Message)
+		if len(allCpIDs) == 0 {
 			return nil
 		}
-		// Check if this checkpoint ID has metadata on entire/checkpoints/v1
-		cpInfo, found := checkpointInfoMap[cpID]
+
+		// Resolve to the latest checkpoint by creation time (consistent with `entire resume`).
+		cpInfo, found := resolveLatestCheckpointFromMap(allCpIDs, checkpointInfoMap, metadataTree)
 		if !found {
 			return nil
 		}
@@ -248,6 +250,46 @@ func (s *ManualCommitStrategy) GetLogsOnlyRewindPoints(ctx context.Context, limi
 	}
 
 	return points, nil
+}
+
+// resolveLatestCheckpointFromMap picks the checkpoint with the latest CreatedAt
+// from a list of checkpoint IDs. Filters to IDs present in infoMap, then uses
+// CollectCheckpointsByAge for timestamp-based resolution from the metadata tree.
+// For a single checkpoint, returns it directly without tree reads.
+func resolveLatestCheckpointFromMap(cpIDs []id.CheckpointID, infoMap map[id.CheckpointID]CheckpointInfo, metadataTree *object.Tree) (CheckpointInfo, bool) {
+	// Filter to IDs that have metadata
+	var validIDs []id.CheckpointID
+	for _, cpID := range cpIDs {
+		if _, ok := infoMap[cpID]; ok {
+			validIDs = append(validIDs, cpID)
+		}
+	}
+	if len(validIDs) == 0 {
+		return CheckpointInfo{}, false
+	}
+	if len(validIDs) == 1 {
+		return infoMap[validIDs[0]], true
+	}
+
+	// Multiple checkpoints: resolve by CreatedAt using metadata tree
+	if metadataTree != nil {
+		sorted := CollectCheckpointsByAge(metadataTree, validIDs)
+		if len(sorted) > 0 {
+			latest := sorted[len(sorted)-1]
+			if info, ok := infoMap[latest.CheckpointID]; ok {
+				return info, true
+			}
+		}
+	}
+
+	// Fallback: use the info map's CreatedAt for ordering
+	info := infoMap[validIDs[0]]
+	for _, cpID := range validIDs[1:] {
+		if candidate := infoMap[cpID]; candidate.CreatedAt.After(info.CreatedAt) {
+			info = candidate
+		}
+	}
+	return info, true
 }
 
 // Rewind restores the working directory to a checkpoint.

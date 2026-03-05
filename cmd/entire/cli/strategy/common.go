@@ -424,6 +424,25 @@ func ReadCheckpointMetadata(tree *object.Tree, checkpointPath string) (*Checkpoi
 	return &metadata, nil
 }
 
+// CollectCheckpointsByAge reads metadata for each checkpoint ID from the tree,
+// skips any that can't be read, and returns them sorted by CreatedAt ascending.
+// The newest checkpoint is last. This is used by both resume and rewind to resolve
+// squash merge commits that contain multiple Entire-Checkpoint trailers.
+func CollectCheckpointsByAge(tree *object.Tree, checkpointIDs []id.CheckpointID) []*CheckpointInfo {
+	var checkpoints []*CheckpointInfo
+	for _, cpID := range checkpointIDs {
+		metadata, err := ReadCheckpointMetadata(tree, cpID.Path())
+		if err != nil {
+			continue
+		}
+		checkpoints = append(checkpoints, metadata)
+	}
+	sort.Slice(checkpoints, func(i, j int) bool {
+		return checkpoints[i].CreatedAt.Before(checkpoints[j].CreatedAt)
+	})
+	return checkpoints
+}
+
 // GetMetadataBranchTree returns the tree object for the entire/checkpoints/v1 branch.
 func GetMetadataBranchTree(repo *git.Repository) (*object.Tree, error) {
 	refName := plumbing.NewBranchReferenceName(paths.MetadataBranchName)
