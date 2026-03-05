@@ -57,6 +57,21 @@ func (r *HookRunner) SimulateUserPromptSubmit(sessionID string) error {
 	return r.runHookWithInput("user-prompt-submit", input)
 }
 
+// SimulateUserPromptSubmitWithPrompt simulates the UserPromptSubmit hook
+// with an explicit user prompt. The prompt is passed to the lifecycle handler
+// and appended to the filesystem prompt.txt.
+func (r *HookRunner) SimulateUserPromptSubmitWithPrompt(sessionID, prompt string) error {
+	r.T.Helper()
+
+	input := map[string]string{
+		"session_id":      sessionID,
+		"transcript_path": "",
+		"prompt":          prompt,
+	}
+
+	return r.runHookWithInput("user-prompt-submit", input)
+}
+
 // SimulateUserPromptSubmitWithTranscriptPath simulates the UserPromptSubmit hook
 // with an explicit transcript path. This is needed for mid-session commit detection
 // which reads the live transcript to detect ongoing sessions.
@@ -66,6 +81,21 @@ func (r *HookRunner) SimulateUserPromptSubmitWithTranscriptPath(sessionID, trans
 	input := map[string]string{
 		"session_id":      sessionID,
 		"transcript_path": transcriptPath,
+	}
+
+	return r.runHookWithInput("user-prompt-submit", input)
+}
+
+// SimulateUserPromptSubmitWithPromptAndTranscriptPath simulates the UserPromptSubmit
+// hook with both an explicit prompt and transcript path. This combines the behavior
+// of SimulateUserPromptSubmitWithPrompt and SimulateUserPromptSubmitWithTranscriptPath.
+func (r *HookRunner) SimulateUserPromptSubmitWithPromptAndTranscriptPath(sessionID, prompt, transcriptPath string) error {
+	r.T.Helper()
+
+	input := map[string]string{
+		"session_id":      sessionID,
+		"transcript_path": transcriptPath,
+		"prompt":          prompt,
 	}
 
 	return r.runHookWithInput("user-prompt-submit", input)
@@ -281,12 +311,26 @@ func (env *TestEnv) SimulateUserPromptSubmit(sessionID string) error {
 	return runner.SimulateUserPromptSubmit(sessionID)
 }
 
+// SimulateUserPromptSubmitWithPrompt is a convenience method on TestEnv.
+func (env *TestEnv) SimulateUserPromptSubmitWithPrompt(sessionID, prompt string) error {
+	env.T.Helper()
+	runner := NewHookRunner(env.RepoDir, env.ClaudeProjectDir, env.T)
+	return runner.SimulateUserPromptSubmitWithPrompt(sessionID, prompt)
+}
+
 // SimulateUserPromptSubmitWithTranscriptPath is a convenience method on TestEnv.
 // This is needed for mid-session commit detection which reads the live transcript.
 func (env *TestEnv) SimulateUserPromptSubmitWithTranscriptPath(sessionID, transcriptPath string) error {
 	env.T.Helper()
 	runner := NewHookRunner(env.RepoDir, env.ClaudeProjectDir, env.T)
 	return runner.SimulateUserPromptSubmitWithTranscriptPath(sessionID, transcriptPath)
+}
+
+// SimulateUserPromptSubmitWithPromptAndTranscriptPath is a convenience method on TestEnv.
+func (env *TestEnv) SimulateUserPromptSubmitWithPromptAndTranscriptPath(sessionID, prompt, transcriptPath string) error {
+	env.T.Helper()
+	runner := NewHookRunner(env.RepoDir, env.ClaudeProjectDir, env.T)
+	return runner.SimulateUserPromptSubmitWithPromptAndTranscriptPath(sessionID, prompt, transcriptPath)
 }
 
 // SimulateUserPromptSubmitWithResponse is a convenience method on TestEnv.

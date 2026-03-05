@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
@@ -138,6 +137,29 @@ func handleLifecycleTurnStart(ctx context.Context, ag agent.Agent, event *agent.
 		return err
 	}
 
+	// Append prompt to prompt.txt on filesystem so it's available for
+	// mid-turn commits (before SaveStep writes it to the shadow branch).
+	// Prompts are separated by "\n\n---\n\n" to support multiple turns.
+	if event.Prompt != "" {
+		sessionDir := paths.SessionMetadataDirFromSessionID(sessionID)
+		if sessionDirAbs, absErr := paths.AbsPath(ctx, sessionDir); absErr == nil {
+			if mkErr := os.MkdirAll(sessionDirAbs, 0o750); mkErr == nil {
+				promptPath := filepath.Join(sessionDirAbs, paths.PromptFileName)
+				existing, readErr := os.ReadFile(promptPath) //nolint:gosec // session metadata path
+				var content string
+				if readErr == nil && len(existing) > 0 {
+					content = string(existing) + "\n\n---\n\n" + event.Prompt
+				} else {
+					content = event.Prompt
+				}
+				if writeErr := os.WriteFile(promptPath, []byte(content), 0o600); writeErr != nil {
+					logging.Warn(logCtx, "failed to write prompt.txt",
+						slog.String("error", writeErr.Error()))
+				}
+			}
+		}
+	}
+
 	// Ensure strategy setup and initialize session
 	if err := strategy.EnsureSetup(ctx); err != nil {
 		logging.Warn(logCtx, "failed to ensure strategy setup",
@@ -234,28 +256,10 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	// Subagent transcripts live in <transcriptDir>/<modelSessionID>/subagents/
 	subagentsDir := filepath.Join(filepath.Dir(transcriptRef), event.SessionID, "subagents")
 
-	// Extract metadata via agent interface (prompts, summary, modified files)
-	var allPrompts []string
-	var summary string
+	// Extract metadata via agent interface (modified files)
 	var modifiedFiles []string
 
 	if analyzer, ok := ag.(agent.TranscriptAnalyzer); ok {
-		// Extract prompts
-		if prompts, promptErr := analyzer.ExtractPrompts(transcriptRef, transcriptOffset); promptErr != nil {
-			logging.Warn(logCtx, "failed to extract prompts",
-				slog.String("error", promptErr.Error()))
-		} else {
-			allPrompts = prompts
-		}
-
-		// Extract summary
-		if s, sumErr := analyzer.ExtractSummary(transcriptRef); sumErr != nil {
-			logging.Warn(logCtx, "failed to extract summary",
-				slog.String("error", sumErr.Error()))
-		} else {
-			summary = s
-		}
-
 		// Extract modified files - prefer SubagentAwareExtractor if available to include subagent files
 		if subagentExtractor, subOk := ag.(agent.SubagentAwareExtractor); subOk {
 			if files, fileErr := subagentExtractor.ExtractAllModifiedFiles(transcriptData, transcriptOffset, subagentsDir); fileErr != nil {
@@ -275,28 +279,10 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 		}
 	}
 
-	// Write prompts file
-	promptFile := filepath.Join(sessionDirAbs, paths.PromptFileName)
-	promptContent := strings.Join(allPrompts, "\n\n---\n\n")
-	if err := os.WriteFile(promptFile, []byte(promptContent), 0o600); err != nil {
-		return fmt.Errorf("failed to write prompt file: %w", err)
-	}
-	logging.Debug(logCtx, "extracted prompts",
-		slog.Int("count", len(allPrompts)),
-		slog.String("path", sessionDir+"/"+paths.PromptFileName))
-
-	// Write summary file
-	summaryFile := filepath.Join(sessionDirAbs, paths.SummaryFileName)
-	if err := os.WriteFile(summaryFile, []byte(summary), 0o600); err != nil {
-		return fmt.Errorf("failed to write summary file: %w", err)
-	}
-	logging.Debug(logCtx, "extracted summary",
-		slog.String("path", sessionDir+"/"+paths.SummaryFileName))
-
-	// Generate commit message from last prompt
+	// Generate commit message from last prompt (read from session state, set at TurnStart)
 	lastPrompt := ""
-	if len(allPrompts) > 0 {
-		lastPrompt = allPrompts[len(allPrompts)-1]
+	if sessionState, stateErr := strategy.LoadSessionState(ctx, sessionID); stateErr == nil && sessionState != nil {
+		lastPrompt = sessionState.LastPrompt
 	}
 	commitMessage := generateCommitMessage(lastPrompt, ag.Type())
 	logging.Debug(logCtx, "using commit message",
@@ -356,14 +342,6 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 
 	// Log file changes
 	logFileChanges(ctx, relModifiedFiles, relNewFiles, relDeletedFiles)
-
-	// Create context file
-	contextFile := filepath.Join(sessionDirAbs, paths.ContextFileName)
-	if err := createContextFile(contextFile, commitMessage, sessionID, allPrompts, summary); err != nil {
-		return fmt.Errorf("failed to create context file: %w", err)
-	}
-	logging.Debug(logCtx, "created context file",
-		slog.String("path", sessionDir+"/"+paths.ContextFileName))
 
 	// Get git author
 	author, err := GetGitAuthor(ctx)
@@ -550,7 +528,10 @@ func handleLifecycleSubagentEnd(ctx context.Context, ag agent.Agent, event *agen
 		logging.Warn(logCtx, "failed to load pre-task state",
 			slog.String("error", err.Error()))
 	}
-	preUntrackedFiles := resolveTaskPreUntrackedFiles(logCtx, preState, event.SessionID)
+	var preUntrackedFiles []string
+	if preState != nil {
+		preUntrackedFiles = preState.PreUntrackedFiles()
+	}
 	changes, err := DetectFileChanges(ctx, preUntrackedFiles)
 	if err != nil {
 		logging.Warn(logCtx, "failed to compute file changes",
@@ -647,61 +628,6 @@ func resolveTranscriptOffset(ctx context.Context, preState *PrePromptState, sess
 	}
 
 	return 0
-}
-
-// resolveTaskPreUntrackedFiles determines the pre-existing untracked files for task
-// checkpoint file-change detection. It checks pre-task state first, then falls back to
-// pre-prompt state for agents that don't have a SubagentStart hook (no pre-task capture).
-// Returns nil if neither state exists, which causes DetectFileChanges to treat all
-// untracked files as new.
-func resolveTaskPreUntrackedFiles(ctx context.Context, preTaskState *PreTaskState, sessionID string) []string {
-	if preTaskState != nil {
-		return preTaskState.PreUntrackedFiles()
-	}
-	if sessionID == "" {
-		return nil
-	}
-	// Fall back to session's pre-prompt state for agents without pre-task hooks
-	prePromptState, err := LoadPrePromptState(ctx, sessionID)
-	if err != nil {
-		logging.Warn(ctx, "failed to load pre-prompt state as fallback",
-			slog.String("error", err.Error()))
-		return nil
-	}
-	if prePromptState != nil {
-		logging.Debug(ctx, "using pre-prompt state as fallback for task file detection",
-			slog.Int("pre_existing_untracked_files", len(prePromptState.UntrackedFiles)))
-		return prePromptState.PreUntrackedFiles()
-	}
-	return nil
-}
-
-// createContextFile creates a context.md file for the session checkpoint.
-// This is a unified version that works for all agents.
-func createContextFile(contextFile, commitMessage, sessionID string, prompts []string, summary string) error {
-	var sb strings.Builder
-
-	sb.WriteString("# Session Context\n\n")
-	fmt.Fprintf(&sb, "Session ID: %s\n", sessionID)
-	fmt.Fprintf(&sb, "Commit Message: %s\n\n", commitMessage)
-
-	if len(prompts) > 0 {
-		sb.WriteString("## Prompts\n\n")
-		for i, p := range prompts {
-			fmt.Fprintf(&sb, "### Prompt %d\n\n%s\n\n", i+1, p)
-		}
-	}
-
-	if summary != "" {
-		sb.WriteString("## Summary\n\n")
-		sb.WriteString(summary)
-		sb.WriteString("\n")
-	}
-
-	if err := os.WriteFile(contextFile, []byte(sb.String()), 0o600); err != nil {
-		return fmt.Errorf("failed to write context file: %w", err)
-	}
-	return nil
 }
 
 // parseTranscriptForCheckpointUUID is a thin wrapper around transcript parsing for checkpoint UUID lookup.

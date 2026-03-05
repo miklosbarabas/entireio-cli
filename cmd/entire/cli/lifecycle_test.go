@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -437,91 +436,6 @@ func TestResolveTranscriptOffset_ZeroOffsetInPrePromptState(t *testing.T) {
 	}
 }
 
-// --- createContextFile tests ---
-
-func TestCreateContextFile_Format(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	contextFile := filepath.Join(tmpDir, "context.md")
-
-	prompts := []string{"What is the meaning of life?", "Follow-up question here"}
-	summary := "This session explored philosophical questions."
-
-	err := createContextFile(contextFile, "feat: add philosophy", "session-123", prompts, summary)
-	if err != nil {
-		t.Fatalf("createContextFile failed: %v", err)
-	}
-
-	content, err := os.ReadFile(contextFile)
-	if err != nil {
-		t.Fatalf("failed to read context file: %v", err)
-	}
-
-	contentStr := string(content)
-
-	// Check for expected sections
-	if !strings.Contains(contentStr, "# Session Context") {
-		t.Error("expected '# Session Context' header")
-	}
-	if !strings.Contains(contentStr, "Session ID: session-123") {
-		t.Error("expected session ID in context file")
-	}
-	if !strings.Contains(contentStr, "Commit Message: feat: add philosophy") {
-		t.Error("expected commit message in context file")
-	}
-	if !strings.Contains(contentStr, "## Prompts") {
-		t.Error("expected '## Prompts' section")
-	}
-	if !strings.Contains(contentStr, "### Prompt 1") {
-		t.Error("expected '### Prompt 1' subsection")
-	}
-	if !strings.Contains(contentStr, "What is the meaning of life?") {
-		t.Error("expected first prompt content")
-	}
-	if !strings.Contains(contentStr, "### Prompt 2") {
-		t.Error("expected '### Prompt 2' subsection")
-	}
-	if !strings.Contains(contentStr, "## Summary") {
-		t.Error("expected '## Summary' section")
-	}
-	if !strings.Contains(contentStr, "philosophical questions") {
-		t.Error("expected summary content")
-	}
-}
-
-func TestCreateContextFile_EmptyPrompts(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	contextFile := filepath.Join(tmpDir, "context.md")
-
-	err := createContextFile(contextFile, "fix: bug", "session-456", nil, "")
-	if err != nil {
-		t.Fatalf("createContextFile failed: %v", err)
-	}
-
-	content, err := os.ReadFile(contextFile)
-	if err != nil {
-		t.Fatalf("failed to read context file: %v", err)
-	}
-
-	contentStr := string(content)
-
-	// Should still have header and session info
-	if !strings.Contains(contentStr, "# Session Context") {
-		t.Error("expected '# Session Context' header")
-	}
-	// Should NOT have prompts section when empty
-	if strings.Contains(contentStr, "## Prompts") {
-		t.Error("unexpected '## Prompts' section when prompts are empty")
-	}
-	// Should NOT have summary section when empty
-	if strings.Contains(contentStr, "## Summary") {
-		t.Error("unexpected '## Summary' section when summary is empty")
-	}
-}
-
 // --- Event type routing tests ---
 
 func TestDispatchLifecycleEvent_RoutesToCorrectHandler(t *testing.T) {
@@ -611,82 +525,6 @@ func TestDispatchLifecycleEvent_RoutesToCorrectHandler(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// --- resolveTaskPreUntrackedFiles tests ---
-
-func TestResolveTaskPreUntrackedFiles_PrefersPreTaskState(t *testing.T) {
-	t.Parallel()
-
-	preTask := &PreTaskState{
-		UntrackedFiles: []string{"hooks.json", "config.yaml"},
-	}
-
-	result := resolveTaskPreUntrackedFiles(context.Background(), preTask, "any-session")
-	if len(result) != 2 {
-		t.Fatalf("expected 2 files from pre-task state, got %d", len(result))
-	}
-	if result[0] != "hooks.json" || result[1] != "config.yaml" {
-		t.Errorf("expected [hooks.json, config.yaml], got %v", result)
-	}
-}
-
-func TestResolveTaskPreUntrackedFiles_FallsBackToPrePromptState(t *testing.T) {
-	// Cannot use t.Parallel() because we use t.Chdir()
-	tmpDir := t.TempDir()
-	t.Chdir(tmpDir)
-
-	// Need a git repo for paths.AbsPath to resolve .entire/tmp
-	setupGitRepoWithCommit(t, tmpDir)
-	paths.ClearWorktreeRootCache()
-
-	// Create .entire/tmp and write a pre-prompt state file
-	entireTmpDir := filepath.Join(tmpDir, ".entire", "tmp")
-	if err := os.MkdirAll(entireTmpDir, 0o750); err != nil {
-		t.Fatalf("Failed to create .entire/tmp: %v", err)
-	}
-
-	sessionID := "fallback-session"
-	state := PrePromptState{
-		SessionID:      sessionID,
-		UntrackedFiles: []string{".github/hooks/entire.json"},
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("Failed to marshal state: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(entireTmpDir, "pre-prompt-"+sessionID+".json"), data, 0o600); err != nil {
-		t.Fatalf("Failed to write state file: %v", err)
-	}
-
-	// nil pre-task state should trigger fallback to pre-prompt state
-	result := resolveTaskPreUntrackedFiles(context.Background(), nil, sessionID)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 file from pre-prompt fallback, got %d", len(result))
-	}
-	if result[0] != ".github/hooks/entire.json" {
-		t.Errorf("expected .github/hooks/entire.json, got %v", result)
-	}
-}
-
-func TestResolveTaskPreUntrackedFiles_NilWhenNoStateExists(t *testing.T) {
-	t.Parallel()
-
-	// nil pre-task state + nonexistent session → should return nil
-	result := resolveTaskPreUntrackedFiles(context.Background(), nil, "nonexistent-session")
-	if result != nil {
-		t.Errorf("expected nil when no state exists, got %v", result)
-	}
-}
-
-func TestResolveTaskPreUntrackedFiles_NilForEmptySessionID(t *testing.T) {
-	t.Parallel()
-
-	// nil pre-task state + empty session ID → should return nil (no fallback attempted)
-	result := resolveTaskPreUntrackedFiles(context.Background(), nil, "")
-	if result != nil {
-		t.Errorf("expected nil for empty session ID, got %v", result)
 	}
 }
 
