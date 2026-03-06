@@ -1,0 +1,64 @@
+name: E2E Triage
+
+on:
+  workflow_run:
+    workflows: ["E2E Tests"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: e2e-triage
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup mise
+        uses: jdx/mise-action@v3
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install Claude Code CLI
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Download E2E artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          chmod +x scripts/download-e2e-artifacts.sh
+          scripts/download-e2e-artifacts.sh "$WORKFLOW_RUN_ID"
+
+      - name: Run triage
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          ARTIFACT_DIR="e2e/artifacts/ci-${WORKFLOW_RUN_ID}"
+          claude -p \
+            --model claude-opus-4-6 \
+            --allowedTools "Bash(mise run *),Bash(gh *),Bash(git *),Read,Write,Edit,Glob,Grep" \
+            "You are triaging E2E test failures from CI run ${WORKFLOW_RUN_ID}.
+             Follow the /e2e-triage skill instructions in .claude/skills/e2e-triage/SKILL.md.
+             Artifact directory: ${ARTIFACT_DIR}
+             CI run URL: ${WORKFLOW_RUN_URL}
+             Do NOT ask questions — act autonomously.
+             For flaky fixes: create a PR.
+             For real bugs: create or comment on GitHub issues.
+             Print a summary table at the end."

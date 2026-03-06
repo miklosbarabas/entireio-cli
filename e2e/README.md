@@ -60,6 +60,8 @@ Artifacts are captured to `e2e/artifacts/` on every run (git-log, git-tree, cons
 
 Use the `debug-e2e` skill (`.claude/skills/debug-e2e/`) for a structured workflow when investigating failures.
 
+Use the `e2e-triage` skill (`.claude/skills/e2e-triage/`) to automate full triage: download CI artifacts, classify failures as flaky vs real bug, and create PRs or GitHub issues. Run locally with `/e2e-triage` or see the automated CI workflow below.
+
 ### Reading artifacts
 
 - `console.log` — full operation transcript including agent stdout/stderr
@@ -82,5 +84,16 @@ To diagnose: read `console.log` in the failing test's artifact directory. Compar
 
 - **`.github/workflows/e2e.yml`** — Runs full suite on push to main. Matrix: `[claude, opencode, gemini]`.
 - **`.github/workflows/e2e-isolated.yml`** — Manual dispatch for debugging a single test. Inputs: agent + test name filter.
+- **`.github/workflows/e2e-triage.yml`** — Auto-triggers on E2E failure via `workflow_run`. Runs Claude Code (Opus) to download artifacts, classify failures, and create PRs (flaky) or issues (real bugs).
 
-Both workflows run `go run ./e2e/bootstrap` before tests to handle agent-specific CI setup (auth config, warmup).
+Both E2E workflows run `go run ./e2e/bootstrap` before tests to handle agent-specific CI setup (auth config, warmup).
+
+### Downloading CI Artifacts Locally
+
+```bash
+scripts/download-e2e-artifacts.sh latest              # Most recent failed run
+scripts/download-e2e-artifacts.sh 12345               # Specific run ID
+scripts/download-e2e-artifacts.sh https://github.com/entireio/cli/actions/runs/12345  # URL
+```
+
+Downloads to `e2e/artifacts/ci-<run-id>/` with per-agent subdirectories and a `.run-info.json` metadata file.
