@@ -23,6 +23,9 @@ Triage E2E test failures by re-running tests, classifying failures as flaky vs r
 
 # Analyze existing artifacts (skip re-running)
 /e2e-triage /path/to/artifact/dir
+
+# Download lastest CI run artifacts and triage
+/e2e-triage get latest CI run
 ```
 
 The skill will:
@@ -50,6 +53,11 @@ Re-run results are the primary signal:
 | FAIL / FAIL / FAIL | Real-bug OR flaky (test-bug) — depends on root cause location |
 
 **Key distinction for consistent failures:** if the root cause is in `cmd/entire/cli/` (product code), it's a **real-bug**. If it's in `e2e/` (test infra), it's **flaky (test-bug)**.
+
+## Related Skills
+
+- `/debug-e2e` — Standalone artifact analysis for diagnosing a specific failure. Use when you already have artifacts and want to understand *what went wrong* without re-running or classifying.
+- `/e2e-triage` uses debug-e2e's workflow internally for its analysis step, then adds classification (flaky vs real-bug) and automated action (fixes/PRs/issues).
 
 ## Key Files
 

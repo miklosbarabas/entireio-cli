@@ -114,13 +114,11 @@ Proceed to **Shared Analysis** (Step 1 below).
 
 ### Step 1: Analyze Each Failure
 
-For each failure, examine available artifacts:
-
-1. **Read `console.log`** — what did the agent actually do? Full chronological transcript.
-2. **Read test source at file:line** — what was expected?
-3. **Read `entire-logs/entire.log`** — any CLI errors, panics, unexpected behavior?
-4. **Read `git-log.txt` / `git-tree.txt`** — repo state at failure time
-5. **Read `checkpoint-metadata/`** — corrupt or missing metadata?
+For each failure, follow the **Debugging Workflow** in `.claude/skills/debug-e2e/SKILL.md` (steps 2-5: console.log → test source → entire.log → deep dive). Collect:
+- What the agent actually did (from console.log)
+- What was expected (from test source)
+- CLI-level errors or anomalies (from entire.log)
+- Repo/checkpoint state (from git-log.txt, git-tree.txt, checkpoint-metadata/)
 
 ### Step 2: Classify Each Failure
 
