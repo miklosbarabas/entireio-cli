@@ -37,7 +37,7 @@ func TestUserSplitsAgentChanges(t *testing.T) {
 
 		// Commit everything remaining (c.md + d.md + any extra files the agent might have created).
 		s.Git(t, "add", "-A")
-		s.Git(t, "commit", "-m", "Add c.md and d.md")
+		s.Git(t, "commit", "-m", "Commit remaining changes (including c.md and d.md)")
 
 		testutil.WaitForCheckpointAdvanceFrom(t, s.Dir, cpBranch1, 15*time.Second)
 		cpID2 := testutil.AssertHasCheckpointTrailer(t, s.Dir, "HEAD")
@@ -140,7 +140,7 @@ func TestSplitModificationsToExistingFiles(t *testing.T) {
 
 		// Commit everything remaining (controller.go + any extra files the agent might have created).
 		s.Git(t, "add", "-A")
-		s.Git(t, "commit", "-m", "Update controller.go")
+		s.Git(t, "commit", "-m", "Commit remaining changes")
 
 		testutil.WaitForCheckpointAdvanceFrom(t, s.Dir, cpBranch2, 15*time.Second)
 		cpID3 := testutil.AssertHasCheckpointTrailer(t, s.Dir, "HEAD")
