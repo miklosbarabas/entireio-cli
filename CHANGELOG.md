@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- External agent plugin system with lazy discovery, timeout protection, feature-flag gating, and stdin/stdout caps ([#604](https://github.com/entireio/cli/pull/604))
+- External agent plugin system with lazy discovery, timeout protection, feature-flag gating, and stdin/stdout caps ([docs](https://docs.entire.io/cli/external-agents), [#604](https://github.com/entireio/cli/pull/604))
 - Vogon deterministic fake agent for cost-free E2E canary testing ([#619](https://github.com/entireio/cli/pull/619))
 - `entire resume` now supports squash-merged commits by parsing checkpoint IDs from the metadata branch ([#534](https://github.com/entireio/cli/pull/534), [#602](https://github.com/entireio/cli/pull/602), [#593](https://github.com/entireio/cli/pull/593))
 - `entire rewind` now supports squash-merged commits ([#612](https://github.com/entireio/cli/pull/612))
