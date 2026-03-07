@@ -128,7 +128,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ":red_circle: *E2E Tests Failed* on `main`\n\nFailed agents: *${{ steps.failed.outputs.agents }}*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run details>\n<${{ github.server_url }}/${{ github.repository }}/actions/workflows/e2e-triage.yml|:mag: Triage these failures> (use run ID: `${{ github.run_id }}`)"
+                    "text": ":red_circle: *E2E Tests Failed* on `main`\n\nFailed agents: *${{ steps.failed.outputs.agents }}*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run details>"
                   }
                 },
                 {

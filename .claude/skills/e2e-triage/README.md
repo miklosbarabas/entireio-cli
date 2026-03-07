@@ -1,15 +1,8 @@
 # E2E Triage Skill
 
-Triage E2E test failures by re-running tests, classifying failures as flaky vs real-bug, and taking appropriate action. Triggered manually via `workflow_dispatch` (no auto-trigger on E2E failures).
+Triage E2E test failures by re-running tests locally, classifying failures as flaky vs real-bug, and applying fixes interactively.
 
-## Two Modes
-
-| Mode | Trigger | Action on flaky | Action on real-bug |
-|------|---------|----------------|--------------------|
-| **Local** | User invokes `/e2e-triage` | Presents findings, applies fixes in working tree | Presents root cause analysis, applies fix if approved |
-| **CI** | `workflow_dispatch` with run ID (via `e2e-triage.yml`) | Creates batched PR | Prints structured report to CI logs (no GitHub issues) |
-
-## Local Usage
+## Usage
 
 ```
 # Triage a specific test
@@ -24,7 +17,7 @@ Triage E2E test failures by re-running tests, classifying failures as flaky vs r
 # Analyze existing artifacts (skip re-running)
 /e2e-triage /path/to/artifact/dir
 
-# Download lastest CI run artifacts and triage
+# Download latest CI run artifacts and triage
 /e2e-triage get latest CI run
 ```
 
@@ -33,13 +26,6 @@ The skill will:
 2. Analyze artifacts (`console.log`, `entire.log`, `git-log.txt`, checkpoint metadata)
 3. Classify each failure and present findings
 4. Ask before applying any fixes
-
-## CI Mode
-
-Triggered manually via `workflow_dispatch` on the `e2e-triage.yml` workflow (use the "Triage" link in the Slack failure notification). Downloads artifacts, re-runs failures via `e2e-isolated.yml`, then:
-- **Flaky fixes** — batched into a single PR (`fix/e2e-flaky-<id>`)
-- **Real bugs** — printed as structured reports in CI logs (no GitHub issues created)
-- **Summary** — writes `triage-summary.json` for Slack notifications
 
 ## Classification Logic
 
@@ -57,10 +43,9 @@ Re-run results are the primary signal:
 ## Related Skills
 
 - `/debug-e2e` — Standalone artifact analysis for diagnosing a specific failure. Use when you already have artifacts and want to understand *what went wrong* without re-running or classifying.
-- `/e2e-triage` uses debug-e2e's workflow internally for its analysis step, then adds classification (flaky vs real-bug) and automated action (fixes/PRs/issues).
+- `/e2e-triage` uses debug-e2e's workflow internally for its analysis step, then adds classification (flaky vs real-bug) and automated action.
 
 ## Key Files
 
 - `SKILL.md` — Full skill definition with all steps, classification rules, and action templates
-- `../../.github/workflows/e2e-triage.yml` — CI workflow that triggers CI mode
 - `../../scripts/download-e2e-artifacts.sh` — Downloads artifacts from CI runs
