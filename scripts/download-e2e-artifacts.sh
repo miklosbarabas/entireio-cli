@@ -60,10 +60,15 @@ log "Commit:  $commit"
 # --- Download artifacts ---
 
 dest="e2e/artifacts/ci-${run_id}"
-mkdir -p "$dest"
 
-log "Downloading artifacts to $dest/ ..."
-gh run download "$run_id" --dir "$dest" 2>/dev/null || die "Failed to download artifacts. They may have expired (retention: 7 days)."
+# If artifacts were already downloaded, skip re-downloading
+if [ -d "$dest" ] && [ "$(ls -A "$dest" 2>/dev/null)" ]; then
+  log "Artifacts already downloaded at $dest/, skipping download."
+else
+  mkdir -p "$dest"
+  log "Downloading artifacts to $dest/ ..."
+  gh run download "$run_id" --dir "$dest" 2>&1 >&2 || die "Failed to download artifacts. They may have expired (retention: 7 days)."
+fi
 
 # --- Restructure: flatten e2e-artifacts-<agent>/ wrapper dirs ---
 
