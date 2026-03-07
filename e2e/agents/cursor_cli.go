@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -66,6 +67,17 @@ func (a *CursorCLI) Bootstrap() error {
 	// On CI, ensure CURSOR_API_KEY is set. Locally, OAuth/keychain works.
 	if os.Getenv("CI") != "" && os.Getenv("CURSOR_API_KEY") == "" {
 		return errors.New("CURSOR_API_KEY must be set on CI for cursor-cli E2E tests")
+	}
+
+	// Pre-create the cursor config directory so the CLI doesn't fail with
+	// ENOENT when writing cli-config.json (e.g., after accepting workspace trust).
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home dir: %w", err)
+	}
+	dir := filepath.Join(home, ".config", "cursor")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	return nil
 }

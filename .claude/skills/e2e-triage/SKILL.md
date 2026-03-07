@@ -189,21 +189,43 @@ Wait for user response before proceeding.
 
 For **flaky** fixes the user approved:
 1. Apply fixes directly in the working tree (no branch creation)
-2. Run verification:
+2. Run static checks:
    ```bash
-   mise run test:e2e:canary   # Must pass
    mise run fmt && mise run lint
+   mise run test:e2e:canary   # Must pass
    ```
-3. If canary fails, investigate and adjust. Report what happened to the user.
+3. **Run real E2E tests to verify the fix.** Scope depends on what was changed:
+   - **Agent-specific fix** (e.g., `e2e/agents/cursor_cli.go`, one agent's config/trust/env): run the full suite for that agent only:
+     ```bash
+     mise run test:e2e --agent <agent>
+     ```
+   - **Shared test infra fix** (e.g., `e2e/agents/agent.go`, `e2e/testutil/`, `TmuxSession`, test helpers): run the full suite for all agents that failed, since the fix could affect any of them:
+     ```bash
+     mise run test:e2e --agent <agent1>
+     mise run test:e2e --agent <agent2>
+     # ... for each agent that had failures
+     ```
+   - **Test prompt fix** (e.g., changed wording in a specific test): run that test across all agents that failed it:
+     ```bash
+     mise run test:e2e --agent <agent> <TestName>
+     ```
+   This step is mandatory — canary tests use the Vogon fake agent and cannot verify agent-specific behavior (trust dialogs, env propagation, config directories, etc.).
+4. If any step fails, investigate and adjust. Report what happened to the user.
 
 For **real-bug** fixes the user approved:
 1. Apply the fix directly in the working tree (no branch creation)
-2. Run relevant tests to verify:
+2. Run static checks and unit tests:
    ```bash
+   mise run fmt && mise run lint
    mise run test        # Unit tests
    mise run test:e2e:canary  # Canary tests
    ```
-3. Report results to the user.
+3. **Run real E2E tests to verify the fix.** Same scoping rules as flaky fixes above:
+   - **Agent-specific change** → full suite for that agent
+   - **Shared CLI/infra change** → full suite for all agents that failed
+   - **Narrow change** (single test affected) → just that test across affected agents
+   Skip only if the user explicitly declines (cost concern).
+4. Report results to the user.
 
 ### Step 5: Summary
 
