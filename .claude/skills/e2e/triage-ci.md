@@ -1,6 +1,6 @@
 # E2E Triage CI
 
-Triage E2E test failures with **re-run verification**. Analyzes artifacts and re-runs failing tests locally to distinguish flaky from real bugs. Produces a findings report with classifications -- does NOT apply fixes.
+Triage E2E test failures with **re-run verification**. Analyzes artifacts and re-runs failing tests locally to distinguish flaky from real bugs. Produces a findings report with classifications -- does NOT apply fixes. Does deep analysis of the code.
 
 ---
 
