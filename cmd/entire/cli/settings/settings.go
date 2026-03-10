@@ -314,6 +314,25 @@ func (s *EntireSettings) IsSummarizeEnabled() bool {
 	return enabled
 }
 
+// GetCheckpointRemote returns the configured checkpoint remote URL.
+// This is a full git remote URL (SSH or HTTPS) used for pushing/fetching
+// the entire/checkpoints/v1 and entire/trails/v1 branches to a separate remote.
+// Returns empty string if not configured or invalid type.
+func (s *EntireSettings) GetCheckpointRemote() string {
+	if s.StrategyOptions == nil {
+		return ""
+	}
+	val, ok := s.StrategyOptions["checkpoint_remote"]
+	if !ok {
+		return ""
+	}
+	str, ok := val.(string)
+	if !ok || str == "" {
+		return ""
+	}
+	return str
+}
+
 // IsPushSessionsDisabled checks if push_sessions is disabled in settings.
 // Returns true if push_sessions is explicitly set to false.
 func (s *EntireSettings) IsPushSessionsDisabled() bool {
