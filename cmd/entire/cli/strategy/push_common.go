@@ -91,7 +91,7 @@ func printCheckpointRemoteHint(remote string) {
 	if remote != checkpointRemoteName {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "[entire] A checkpoint remote is configured in .entire/settings.json but could not be reached.")
+	fmt.Fprintln(os.Stderr, "[entire] A checkpoint remote is configured in Entire settings (.entire/settings.json or .entire/settings.local.json) but could not be reached.")
 	fmt.Fprintln(os.Stderr, "[entire] Checkpoints are saved locally but not synced. Ensure you have access to the checkpoint remote.")
 }
 
