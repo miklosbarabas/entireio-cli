@@ -268,7 +268,7 @@ func TestFetchBranchIfMissing_CreatesLocalFromRemote(t *testing.T) {
 	assert.False(t, testutil.BranchExists(t, localDir, "entire/checkpoints/v1"))
 
 	// Fetch using the remote dir as a URL (local path)
-	require.NoError(t, fetchBranchIfMissing(ctx, remoteDir, "entire/checkpoints/v1"))
+	require.NoError(t, fetchMetadataBranchIfMissing(ctx, remoteDir))
 
 	// Verify the branch now exists locally
 	assert.True(t, testutil.BranchExists(t, localDir, "entire/checkpoints/v1"))
@@ -322,7 +322,7 @@ func TestFetchBranchIfMissing_NoOpWhenBranchExistsLocally(t *testing.T) {
 
 	// Should be a no-op since branch exists locally (no network call).
 	// Use a nonexistent path — if it tried to fetch, it would fail.
-	require.NoError(t, fetchBranchIfMissing(ctx, "/nonexistent/repo.git", "entire/checkpoints/v1"))
+	require.NoError(t, fetchMetadataBranchIfMissing(ctx, "/nonexistent/repo.git"))
 }
 
 // Not parallel: uses t.Chdir()
@@ -345,7 +345,7 @@ func TestFetchBranchIfMissing_NoOpWhenBranchNotOnRemote(t *testing.T) {
 
 	t.Chdir(localDir)
 
-	err := fetchBranchIfMissing(ctx, remoteDir, "entire/checkpoints/v1")
+	err := fetchMetadataBranchIfMissing(ctx, remoteDir)
 	require.NoError(t, err)
 
 	// Branch should still not exist locally

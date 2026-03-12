@@ -123,9 +123,8 @@ func resolvePushSettings(ctx context.Context, pushRemoteName string) pushSetting
 	// This is a one-time operation — once the branch exists locally, subsequent pushes
 	// skip the fetch entirely. Only fetch the metadata branch; trails are always pushed
 	// to the user's push remote, not the checkpoint remote.
-	if err := fetchBranchIfMissing(ctx, checkpointURL, paths.MetadataBranchName); err != nil {
-		logging.Warn(ctx, "checkpoint-remote: failed to fetch branch",
-			slog.String("branch", paths.MetadataBranchName),
+	if err := fetchMetadataBranchIfMissing(ctx, checkpointURL); err != nil {
+		logging.Warn(ctx, "checkpoint-remote: failed to fetch metadata branch",
 			slog.String("error", err.Error()),
 		)
 	}
@@ -268,11 +267,13 @@ func redactURL(rawURL string) string {
 	return u.Scheme + "://" + host + path
 }
 
-// fetchBranchIfMissing fetches a branch from a URL only if it doesn't exist locally.
+// fetchMetadataBranchIfMissing fetches the metadata branch from a URL only if it doesn't exist locally.
 // This avoids network calls on every push — once the branch exists locally, this is a no-op.
 // Fetch failures are silently swallowed (returns nil): the push will handle creating the
 // branch on the remote. Only fatal errors (opening repo, creating local branch) are returned.
-func fetchBranchIfMissing(ctx context.Context, remoteURL, branchName string) error {
+func fetchMetadataBranchIfMissing(ctx context.Context, remoteURL string) error {
+	branchName := paths.MetadataBranchName
+
 	repo, err := OpenRepository(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open repository: %w", err)
@@ -317,8 +318,6 @@ func fetchBranchIfMissing(ctx context.Context, remoteURL, branchName string) err
 	// Clean up the temp ref (best-effort, not critical if it fails)
 	_ = repo.Storer.RemoveReference(plumbing.ReferenceName(tmpRef)) //nolint:errcheck // cleanup is best-effort
 
-	logging.Info(ctx, "checkpoint-remote: fetched branch from URL",
-		slog.String("branch", branchName),
-	)
+	logging.Info(ctx, "checkpoint-remote: fetched metadata branch from URL")
 	return nil
 }
