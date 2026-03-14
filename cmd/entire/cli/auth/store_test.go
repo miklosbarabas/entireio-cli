@@ -14,8 +14,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestStoreSaveAndGetToken(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: go-keyring's mock provider uses an unprotected map.
 	store := NewStoreWithService("test-save-get")
 
 	if err := store.SaveToken("https://entire.io", "prod-token"); err != nil {
@@ -32,8 +31,7 @@ func TestStoreSaveAndGetToken(t *testing.T) {
 }
 
 func TestStoreGetToken_NotFound(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: go-keyring's mock provider uses an unprotected map.
 	store := NewStoreWithService("test-not-found")
 
 	got, err := store.GetToken("https://missing.example.com")
@@ -46,8 +44,7 @@ func TestStoreGetToken_NotFound(t *testing.T) {
 }
 
 func TestStoreSaveToken_PreservesOtherBaseURLs(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: go-keyring's mock provider uses an unprotected map.
 	store := NewStoreWithService("test-preserve")
 
 	if err := store.SaveToken("https://entire.io", "prod-token"); err != nil {
@@ -76,8 +73,7 @@ func TestStoreSaveToken_PreservesOtherBaseURLs(t *testing.T) {
 }
 
 func TestStoreSaveToken_RejectsEmptyToken(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: go-keyring's mock provider uses an unprotected map.
 	store := NewStoreWithService("test-empty")
 
 	if err := store.SaveToken("https://entire.io", ""); err == nil {
@@ -90,8 +86,7 @@ func TestStoreSaveToken_RejectsEmptyToken(t *testing.T) {
 }
 
 func TestStoreDeleteToken(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: go-keyring's mock provider uses an unprotected map.
 	store := NewStoreWithService("test-delete")
 
 	if err := store.SaveToken("https://entire.io", "tok"); err != nil {
@@ -112,8 +107,7 @@ func TestStoreDeleteToken(t *testing.T) {
 }
 
 func TestStoreDeleteToken_NotFoundIsNoop(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: go-keyring's mock provider uses an unprotected map.
 	store := NewStoreWithService("test-delete-noop")
 
 	if err := store.DeleteToken("https://nonexistent.example.com"); err != nil {
