@@ -20,7 +20,8 @@ const maxPollInterval = 30 * time.Second
 const maxExpiresIn = 15 * time.Minute
 const maxTransientErrors = 5
 
-var browserOpener = openBrowser
+// browserOpenFunc is the signature for opening a URL in the user's browser.
+type browserOpenFunc func(ctx context.Context, url string) error
 
 // deviceAuthClient abstracts the auth client so runLogin and waitForApproval can be unit-tested.
 type deviceAuthClient interface {
@@ -37,7 +38,7 @@ func newLoginCmd() *cobra.Command {
 		Short: "Log in to Entire",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client := auth.NewClient(nil)
-			return runLogin(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, printBrowserURL)
+			return runLogin(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, openBrowser, printBrowserURL)
 		},
 	}
 
@@ -46,7 +47,7 @@ func newLoginCmd() *cobra.Command {
 	return cmd
 }
 
-func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient, printBrowserURL bool) error {
+func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient, openURL browserOpenFunc, printBrowserURL bool) error {
 	start, err := client.StartDeviceAuth(ctx)
 	if err != nil {
 		return fmt.Errorf("start login: %w", err)
@@ -63,7 +64,7 @@ func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient
 	if printBrowserURL {
 		fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
 	} else {
-		if err := browserOpener(ctx, approvalURL); err != nil {
+		if err := openURL(ctx, approvalURL); err != nil {
 			fmt.Fprintf(errW, "Warning: failed to open browser automatically: %v\n", err)
 			fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
 		} else {
