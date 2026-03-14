@@ -61,25 +61,11 @@ func (c *Client) BaseURL() string {
 }
 
 func (c *Client) StartDeviceAuth(ctx context.Context) (*DeviceAuthStart, error) {
-	endpoint, err := apiurl.ResolveURLFromBase(c.baseURL, "/oauth/device/code")
-	if err != nil {
-		return nil, fmt.Errorf("resolve device auth start URL: %w", err)
-	}
-
 	body := url.Values{}
 	body.Set("client_id", clientID)
 	body.Set("scope", "cli")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("create device auth start request: %w", err)
-	}
-
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "entire-cli")
-
-	resp, err := c.httpClient.Do(req) //nolint:gosec // base URL is constrained to Entire API or explicit local dev override
+	resp, err := c.postForm(ctx, "/oauth/device/code", body)
 	if err != nil {
 		return nil, fmt.Errorf("start device auth: %w", err)
 	}
@@ -98,26 +84,12 @@ func (c *Client) StartDeviceAuth(ctx context.Context) (*DeviceAuthStart, error) 
 }
 
 func (c *Client) PollDeviceAuth(ctx context.Context, deviceCode string) (*DeviceAuthPoll, error) {
-	endpoint, err := apiurl.ResolveURLFromBase(c.baseURL, "/oauth/token")
-	if err != nil {
-		return nil, fmt.Errorf("resolve device auth poll URL: %w", err)
-	}
-
 	body := url.Values{}
 	body.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 	body.Set("client_id", clientID)
 	body.Set("device_code", deviceCode)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("create device auth poll request: %w", err)
-	}
-
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "entire-cli")
-
-	resp, err := c.httpClient.Do(req) //nolint:gosec // base URL is constrained to Entire API or explicit local dev override
+	resp, err := c.postForm(ctx, "/oauth/token", body)
 	if err != nil {
 		return nil, fmt.Errorf("poll device auth: %w", err)
 	}
@@ -137,6 +109,30 @@ func (c *Client) PollDeviceAuth(ctx context.Context, deviceCode string) (*Device
 	}
 
 	return &result, nil
+}
+
+// postForm sends a POST request with form-encoded body to an API-relative path.
+func (c *Client) postForm(ctx context.Context, path string, body url.Values) (*http.Response, error) {
+	endpoint, err := apiurl.ResolveURLFromBase(c.baseURL, path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve URL %s: %w", path, err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", clientID)
+
+	resp, err := c.httpClient.Do(req) //nolint:gosec // base URL is constrained to Entire API or explicit local dev override
+	if err != nil {
+		return nil, fmt.Errorf("request %s: %w", path, err)
+	}
+
+	return resp, nil
 }
 
 func readAPIErrorResponse(resp *http.Response) (*errorResponse, error) {

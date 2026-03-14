@@ -124,8 +124,13 @@ func waitForApproval(ctx context.Context, poller deviceAuthClient, deviceCode st
 		consecutiveErrors = 0
 
 		switch result.Error {
-		case "", "authorization_pending":
-			// continue below
+		case "":
+			if result.AccessToken == "" {
+				return "", errors.New("device authorization completed without a token")
+			}
+			return result.AccessToken, nil
+		case "authorization_pending":
+			// no-op, will sleep and retry below
 		case "slow_down":
 			pollInterval += slowDownBackoff
 			if pollInterval > maxPollInterval {
@@ -137,13 +142,6 @@ func waitForApproval(ctx context.Context, poller deviceAuthClient, deviceCode st
 			return "", errors.New("device authorization expired")
 		default:
 			return "", fmt.Errorf("device authorization failed: %s", result.Error)
-		}
-
-		if result.Error == "" {
-			if result.AccessToken == "" {
-				return "", errors.New("device authorization completed without a token")
-			}
-			return result.AccessToken, nil
 		}
 
 		select {
