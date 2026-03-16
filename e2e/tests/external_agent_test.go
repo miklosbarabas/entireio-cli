@@ -46,6 +46,10 @@ func TestExternalAgentSingleSessionManualCommit(t *testing.T) {
 // in a single checkpoint.
 func TestExternalAgentMultipleTurnsManualCommit(t *testing.T) {
 	testutil.ForEachAgent(t, 2*time.Minute, func(t *testing.T, s *testutil.RepoState, ctx context.Context) {
+		if !s.IsExternalAgent() {
+			t.Skip("skipping external agent test for non-external agent")
+		}
+
 		_, err := s.RunPrompt(t, ctx,
 			"create a file called src/alpha.txt")
 		if err != nil {

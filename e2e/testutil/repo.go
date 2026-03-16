@@ -412,6 +412,13 @@ func (s *RepoState) WaitFor(t *testing.T, session agents.Session, pattern string
 	}
 }
 
+// IsExternalAgent returns true if the agent implements the ExternalAgent
+// interface and reports itself as external.
+func (s *RepoState) IsExternalAgent() bool {
+	ea, ok := s.Agent.(agents.ExternalAgent)
+	return ok && ea.IsExternalAgent()
+}
+
 // Send sends input to an interactive session and logs it to ConsoleLog.
 // Fails the test on error.
 func (s *RepoState) Send(t *testing.T, session agents.Session, input string) {
