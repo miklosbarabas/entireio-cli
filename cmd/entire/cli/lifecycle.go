@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
@@ -349,6 +350,30 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	// Determine transcript offset
 	transcriptOffset := resolveTranscriptOffset(ctx, preState, sessionID)
 
+	// Backfill prompt.txt from transcript when prompt data is missing.
+	// This handles agents whose exec mode doesn't fire UserPromptSubmit (e.g., Factory AI
+	// Droid). The transcript is the source of truth — if ExtractPrompts returns nothing,
+	// there genuinely were no prompts. We track whether backfill occurred so we can
+	// update session state after SaveStep (which may reinitialize state).
+	var backfilledPrompt string
+	promptPath := filepath.Join(sessionDirAbs, paths.PromptFileName)
+	existingPrompt, _ := os.ReadFile(promptPath) //nolint:gosec,errcheck // missing file means empty prompt — should backfill
+	if len(existingPrompt) == 0 {
+		if extractor, ok := agent.AsPromptExtractor(ag); ok {
+			if prompts, extractErr := extractor.ExtractPrompts(transcriptRef, transcriptOffset); extractErr == nil && len(prompts) > 0 {
+				content := strings.Join(prompts, "\n\n---\n\n")
+				if writeErr := os.WriteFile(promptPath, []byte(content), 0o600); writeErr != nil {
+					logging.Warn(logCtx, "failed to backfill prompt.txt from transcript",
+						slog.String("error", writeErr.Error()))
+				} else {
+					logging.Debug(logCtx, "backfilled prompt.txt from transcript",
+						slog.Int("prompt_count", len(prompts)))
+				}
+				backfilledPrompt = prompts[len(prompts)-1]
+			}
+		}
+	}
+
 	// Compute subagents directory for agents that support subagent extraction.
 	// Subagent transcripts live in <transcriptDir>/<modelSessionID>/subagents/
 	subagentsDir := filepath.Join(filepath.Dir(transcriptRef), event.SessionID, "subagents")
@@ -490,6 +515,19 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 
 	if err := strat.SaveStep(ctx, stepCtx); err != nil {
 		return fmt.Errorf("failed to save step: %w", err)
+	}
+
+	// Update session state with backfilled prompt after SaveStep.
+	// Done after SaveStep because SaveStep may reinitialize session state,
+	// which would overwrite an earlier LastPrompt update.
+	if backfilledPrompt != "" {
+		if state, stateErr := strategy.LoadSessionState(ctx, sessionID); stateErr == nil && state != nil && state.LastPrompt == "" {
+			state.LastPrompt = backfilledPrompt
+			if saveErr := strategy.SaveSessionState(ctx, state); saveErr != nil {
+				logging.Warn(logCtx, "failed to backfill LastPrompt in session state",
+					slog.String("error", saveErr.Error()))
+			}
+		}
 	}
 
 	// Transition session phase and cleanup
