@@ -10,11 +10,19 @@ export E2E_AGENT="roger-roger"
 mise run build
 export E2E_ENTIRE_BIN="$PWD/entire"
 
-# Install roger-roger binaries from GitHub
-ROGER_ROGER_MODULE="${ROGER_ROGER_MODULE:-github.com/entireio/roger-roger}"
-echo "installing roger-roger binaries from $ROGER_ROGER_MODULE"
-GOBIN="$PWD/bin" go install "$ROGER_ROGER_MODULE/cmd/roger-roger@latest" "$ROGER_ROGER_MODULE/cmd/entire-agent-roger-roger@latest"
-export PATH="$PWD/bin:$PATH"
+# Ensure roger-roger binaries are available on PATH before running E2E tests.
+# They are typically installed via mise (see mise.toml [tools]), but we fail fast
+# here if they are missing so the suite cannot silently "succeed" without
+# exercising the external agent.
+if ! command -v roger-roger >/dev/null 2>&1; then
+  echo "error: 'roger-roger' binary not found on PATH. Install it via 'mise install' or ensure it is available before running this task." >&2
+  exit 1
+fi
+
+if ! command -v entire-agent-roger-roger >/dev/null 2>&1; then
+  echo "error: 'entire-agent-roger-roger' binary not found on PATH. Install it via 'mise install' or ensure it is available before running this task." >&2
+  exit 1
+fi
 
 if [ -z "${E2E_ARTIFACT_DIR:-}" ]; then
   E2E_ARTIFACT_DIR="$PWD/e2e/artifacts/roger-roger-$(date +%Y-%m-%dT%H-%M-%S)"
