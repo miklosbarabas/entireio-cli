@@ -21,7 +21,7 @@ jobs:
         with:
           go-version: 'stable'
 
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v4
 
       - name: Run linters
         run: mise run lint
@@ -32,5 +32,5 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: 'v2.10.1'
+          version: 'v2.11.3'
           debug: 'clean'
