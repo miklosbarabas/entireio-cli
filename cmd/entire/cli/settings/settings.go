@@ -286,7 +286,7 @@ func IsSetUpAny(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(localFileAbs)
+	_, err = os.Lstat(localFileAbs)
 	return err == nil
 }
 
