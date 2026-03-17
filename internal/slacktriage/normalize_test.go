@@ -28,7 +28,6 @@ func TestNormalizeTrigger(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			if got := NormalizeTrigger(tt.in); got != tt.want {
@@ -46,7 +45,6 @@ func TestIsTriageTrigger(t *testing.T) {
 	}
 
 	for _, in := range []string{"triage", "triage e2e now", "triage-e2e"} {
-		in := in
 		t.Run(in, func(t *testing.T) {
 			t.Parallel()
 			if IsTriageTrigger(in) {

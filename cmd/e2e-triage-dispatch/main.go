@@ -63,7 +63,12 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/slack/events", handler)
 
-	log.Fatal(http.ListenAndServe(cfg.Addr, mux))
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 func loadConfigFromEnv() (Config, error) {
@@ -243,19 +248,22 @@ func (h *triageHandler) handleEvent(ctx context.Context, event slackEvent) error
 
 	parentBody, err := h.slack.FetchParentMessage(ctx, event.Channel, event.ThreadTS)
 	if err != nil {
-		return err
+		return fmt.Errorf("fetch parent message: %w", err)
 	}
 
 	metadata, err := slacktriage.ParseParentMessageMetadata(parentBody)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse parent message metadata: %w", err)
 	}
 	if h.cfg.AllowedRepo != "" && metadata.Repo != h.cfg.AllowedRepo {
 		return nil
 	}
 
 	payload := slacktriage.NewDispatchPayload(metadata, event.Channel, event.ThreadTS, event.User)
-	return h.github.DispatchRepositoryEvent(ctx, payload)
+	if err := h.github.DispatchRepositoryEvent(ctx, payload); err != nil {
+		return fmt.Errorf("dispatch repository event: %w", err)
+	}
+	return nil
 }
 
 type slackEnvelope struct {
@@ -278,7 +286,9 @@ type slackEvent struct {
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		log.Printf("write json response: %v", err)
+	}
 }
 
 func absDuration(d time.Duration) time.Duration {
@@ -308,7 +318,7 @@ func newSlackHTTPClient(token, baseURL string) *slackHTTPClient {
 func (c *slackHTTPClient) FetchParentMessage(ctx context.Context, channel, threadTS string) (string, error) {
 	endpoint, err := url.Parse(c.baseURL + "/conversations.replies")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse slack conversations.replies url: %w", err)
 	}
 
 	query := endpoint.Query()
@@ -320,13 +330,14 @@ func (c *slackHTTPClient) FetchParentMessage(ctx context.Context, channel, threa
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("build slack conversations.replies request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
+	//nolint:gosec // Slack API base URL is operator-configured.
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("call slack conversations.replies: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -342,7 +353,7 @@ func (c *slackHTTPClient) FetchParentMessage(ctx context.Context, channel, threa
 		} `json:"messages"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", err
+		return "", fmt.Errorf("decode slack conversations.replies response: %w", err)
 	}
 	if !payload.OK {
 		if payload.Error == "" {
@@ -389,26 +400,30 @@ func (d *githubHTTPDispatcher) DispatchRepositoryEvent(ctx context.Context, payl
 		ClientPayload: payload,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal github dispatch payload: %w", err)
 	}
 
 	endpoint := fmt.Sprintf("%s/repos/%s/dispatches", d.baseURL, d.repository)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("build github dispatch request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+d.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
 
+	//nolint:gosec // GitHub API base URL and repository are operator-configured.
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("call github dispatch endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent {
-		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return fmt.Errorf("github dispatch failed: %s (read response): %w", resp.Status, readErr)
+		}
 		if len(responseBody) > 0 {
 			return fmt.Errorf("github dispatch failed: %s: %s", resp.Status, strings.TrimSpace(string(responseBody)))
 		}

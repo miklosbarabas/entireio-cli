@@ -6,11 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +52,7 @@ func TestHandler_URLVerification(t *testing.T) {
 
 	handler := newTestHandler(t)
 	body := `{"type":"url_verification","challenge":"abc123"}`
-	req := signedRequest(t, http.MethodPost, "/slack/events", body, testSigningSecret, fixedNow())
+	req := signedRequest(t, body, fixedNow())
 
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -77,7 +77,7 @@ func TestHandler_RejectsBadSignature(t *testing.T) {
 
 	handler := newTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(`{"type":"event_callback"}`))
-	req.Header.Set("X-Slack-Request-Timestamp", fmt.Sprintf("%d", fixedNow().Unix()))
+	req.Header.Set("X-Slack-Request-Timestamp", strconv.FormatInt(fixedNow().Unix(), 10))
 	req.Header.Set("X-Slack-Signature", "v0=deadbeef")
 
 	rr := httptest.NewRecorder()
@@ -96,7 +96,7 @@ func TestHandler_IgnoresNonThreadReplies(t *testing.T) {
 	handler := newHandlerForTest(t, fetcher, dispatcher)
 
 	body := `{"type":"event_callback","event":{"type":"message","channel":"C123","user":"U123","text":"triage e2e","ts":"111.222","thread_ts":"111.222"}}`
-	req := signedRequest(t, http.MethodPost, "/slack/events", body, testSigningSecret, fixedNow())
+	req := signedRequest(t, body, fixedNow())
 
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -120,7 +120,7 @@ func TestHandler_IgnoresNonTriggerReplies(t *testing.T) {
 	handler := newHandlerForTest(t, fetcher, dispatcher)
 
 	body := `{"type":"event_callback","event":{"type":"message","channel":"C123","user":"U123","text":"hello world","ts":"111.222","thread_ts":"111.111"}}`
-	req := signedRequest(t, http.MethodPost, "/slack/events", body, testSigningSecret, fixedNow())
+	req := signedRequest(t, body, fixedNow())
 
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -146,7 +146,7 @@ func TestHandler_DispatchesValidTriggerReply(t *testing.T) {
 	handler := newHandlerForTest(t, fetcher, dispatcher)
 
 	body := `{"type":"event_callback","event":{"type":"message","channel":"C123","user":"U123","text":"triage e2e","ts":"111.222","thread_ts":"111.111"}}`
-	req := signedRequest(t, http.MethodPost, "/slack/events", body, testSigningSecret, fixedNow())
+	req := signedRequest(t, body, fixedNow())
 
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -195,7 +195,6 @@ func TestHandler_IgnoresBotAndSystemMessages(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -203,7 +202,7 @@ func TestHandler_IgnoresBotAndSystemMessages(t *testing.T) {
 			dispatcher := &fakeGitHubDispatcher{}
 			handler := newHandlerForTest(t, fetcher, dispatcher)
 
-			req := signedRequest(t, http.MethodPost, "/slack/events", tt.body, testSigningSecret, fixedNow())
+			req := signedRequest(t, tt.body, fixedNow())
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
 
@@ -266,7 +265,7 @@ func TestHandler_RejectsMismatchedParentRepo(t *testing.T) {
 	handler := newHandlerForTest(t, fetcher, dispatcher)
 
 	body := `{"type":"event_callback","event":{"type":"message","channel":"C123","user":"U123","text":"triage e2e","ts":"111.222","thread_ts":"111.111"}}`
-	req := signedRequest(t, http.MethodPost, "/slack/events", body, testSigningSecret, fixedNow())
+	req := signedRequest(t, body, fixedNow())
 
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -283,12 +282,13 @@ func fixedNow() time.Time {
 	return time.Unix(1_700_000_000, 0).UTC()
 }
 
-func signedRequest(t *testing.T, method, target, body, secret string, now time.Time) *http.Request {
+func signedRequest(t *testing.T, body string, now time.Time) *http.Request {
 	t.Helper()
 
-	req := httptest.NewRequest(method, target, strings.NewReader(body))
-	req.Header.Set("X-Slack-Request-Timestamp", fmt.Sprintf("%d", now.Unix()))
-	req.Header.Set("X-Slack-Signature", slackSignature(secret, fmt.Sprintf("%d", now.Unix()), body))
+	req := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(body))
+	timestamp := strconv.FormatInt(now.Unix(), 10)
+	req.Header.Set("X-Slack-Request-Timestamp", timestamp)
+	req.Header.Set("X-Slack-Signature", slackSignature(testSigningSecret, timestamp, body))
 	return req
 }
 
@@ -303,9 +303,7 @@ func newTestHandler(t *testing.T) http.Handler {
 	return newHandler(Config{
 		SigningSecret: testSigningSecret,
 		AllowedRepo:   "entireio/cli",
-	}, &fakeSlackFetcher{}, &fakeGitHubDispatcher{}, func() time.Time {
-		return fixedNow()
-	})
+	}, &fakeSlackFetcher{}, &fakeGitHubDispatcher{}, fixedNow)
 }
 
 func newHandlerForTest(t *testing.T, slack *fakeSlackFetcher, github *fakeGitHubDispatcher) http.Handler {
@@ -313,9 +311,7 @@ func newHandlerForTest(t *testing.T, slack *fakeSlackFetcher, github *fakeGitHub
 	return newHandler(Config{
 		SigningSecret: testSigningSecret,
 		AllowedRepo:   "entireio/cli",
-	}, slack, github, func() time.Time {
-		return fixedNow()
-	})
+	}, slack, github, fixedNow)
 }
 
 type fakeSlackFetcher struct {
