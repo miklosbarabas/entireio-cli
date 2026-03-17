@@ -125,7 +125,9 @@ jobs:
         run: |
           failed=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs \
             --jq '[.jobs[] | select(.conclusion == "failure") | .name | capture("\\((?<agent>[^)]+)\\)") | .agent] | join(", ")')
+          failed_csv="${failed//, /,}"
           echo "agents=$failed" >> "$GITHUB_OUTPUT"
+          echo "agents_csv=$failed_csv" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack of E2E failure
         uses: slackapi/slack-github-action@91efab103c0de0a537f72a35f6b8cda0ee76bf0a # v2.1.1
@@ -145,6 +147,10 @@ jobs:
                 {
                   "type": "context",
                   "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "meta: repo=${{ github.repository }} branch=${{ github.ref_name }} run_id=${{ github.run_id }} run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} sha=${{ github.sha }} agents=${{ steps.failed.outputs.agents_csv }}"
+                    },
                     {
                       "type": "mrkdwn",
                       "text": "Commit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}> by ${{ github.actor }}"
