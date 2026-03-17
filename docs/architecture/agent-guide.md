@@ -429,8 +429,8 @@ The framework dispatcher (`DispatchLifecycleEvent` in `lifecycle.go`) handles ea
 | `TurnEnd` | Validates transcript, extracts metadata (prompts, summary, files), detects file changes via git status, saves step + checkpoint, transitions phase to IDLE | `stop` | `after-agent` | `stop` | `turn-end` | `stop` |
 | `Compaction` | Fires compaction transition (stays ACTIVE), resets transcript offset | *(not used)* | `pre-compress` | `pre-compact` | `compaction` | `pre-compact` |
 | `SessionEnd` | Marks session as ENDED in state machine | `session-end` | `session-end` | `session-end` | `session-end` | `session-end` |
-| `SubagentStart` | Captures pre-task state (git status snapshot) | `pre-task` (PreToolUse[Task]) | *(not used)* | `subagent-start` | *(not used)* | `pre-tool-use` (PreToolUse[Task]) |
-| `SubagentEnd` | Extracts subagent modified files, detects changes, saves task checkpoint | `post-task` (PostToolUse[Task]) | *(not used)* | `subagent-stop` | *(not used)* | `post-tool-use` (PostToolUse[Task]) |
+| `SubagentStart` | Captures pre-task state (git status snapshot) | `pre-task` (PreToolUse[Task]) | *(not used)* | `subagent-start` | *(not used)* | `pre-tool-use` (config-level `matcher: Task`) |
+| `SubagentEnd` | Extracts subagent modified files, detects changes, saves task checkpoint | `post-task` (PostToolUse[Task]) | *(not used)* | `subagent-stop` | *(not used)* | `post-tool-use` (config-level `matcher: Task`) |
 
 ### Event Field Requirements
 
@@ -576,7 +576,7 @@ Similar to Claude Code's JSONL format (one JSON object per line), but with a dif
 {"type":"message","id":"...","message":{"role":"user","content":"Fix the bug"}}
 ```
 
-Unlike Claude Code's `{"type":"assistant",...}`, Droid uses `type: "message"` with the role inside the `message` object. Non-message entries (e.g., `session_start`) are skipped during parsing.
+Unlike Claude Code's `{"type":"assistant",...}`, Droid uses `type: "message"` with the role inside the `message` object. The `content` field can be either a plain string or an array of content blocks (text, tool_result, etc.). Non-message entries (e.g., `session_start`) are skipped during parsing.
 
 **Chunking:** Same as Claude Code - `agent.ChunkJSONL(content, maxSize)` splits at newline boundaries.
 **Reassembly:** Same as Claude Code - `agent.ReassembleJSONL(chunks)` concatenates with newlines.
@@ -672,18 +672,33 @@ Note: Cursor uses camelCase hook names in `.cursor/hooks.json` and provides a `c
 ```json
 {
   "hooks": {
-    "SessionStart": [{"command": "entire hooks factoryai-droid session-start"}],
-    "SessionEnd": [{"command": "entire hooks factoryai-droid session-end"}],
-    "UserPromptSubmit": [{"command": "entire hooks factoryai-droid user-prompt-submit"}],
-    "Stop": [{"command": "entire hooks factoryai-droid stop"}],
-    "PreToolUse": [{"tool_name": "Task", "command": "entire hooks factoryai-droid pre-tool-use"}],
-    "PostToolUse": [{"tool_name": "Task", "command": "entire hooks factoryai-droid post-tool-use"}],
-    "PreCompact": [{"command": "entire hooks factoryai-droid pre-compact"}]
+    "SessionStart": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid session-start"}]},
+      {"matcher": "", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid user-prompt-submit"}]}
+    ],
+    "SessionEnd": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid session-end"}]}
+    ],
+    "UserPromptSubmit": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid user-prompt-submit"}]}
+    ],
+    "Stop": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid stop"}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Task", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid pre-tool-use"}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "Task", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid post-tool-use"}]}
+    ],
+    "PreCompact": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "entire hooks factoryai-droid pre-compact"}]}
+    ]
   }
 }
 ```
 
-Note: Factory AI Droid uses PascalCase hook names in `.factory/settings.json`. PreToolUse/PostToolUse use `tool_name` matchers to scope to specific tools (e.g., `Task` for subagent tracking).
+Note: Factory AI Droid uses PascalCase hook names in `.factory/settings.json` with a nested `matcher`/`hooks` structure. The `matcher` field scopes which tool triggers the hook (empty string = all tools). `SessionStart` includes a second `user-prompt-submit` entry to ensure `TurnStart` fires in droid exec mode where `UserPromptSubmit` doesn't fire. `PreToolUse`/`PostToolUse` use `"matcher": "Task"` to scope to subagent tracking.
 
 ### Plugin File Pattern (OpenCode)
 
