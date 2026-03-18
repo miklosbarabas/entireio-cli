@@ -340,8 +340,8 @@ func TestPostCommit_IdleSession_NoNewContent_PreservesBaseCommit(t *testing.T) {
 	require.NoError(t, err)
 	state.Phase = session.PhaseIdle
 	state.LastInteractionTime = nil
-	state.CheckpointTranscriptStart = 2  // Transcript has exactly 2 lines
-	state.CheckpointTranscriptSize = 112 // Byte size of the 2-line transcript on shadow branch
+	state.CheckpointTranscriptStart = 2                                   // Transcript has exactly 2 lines
+	state.CheckpointTranscriptSize = shadowTranscriptSize(t, repo, state) // Match blob size on shadow branch
 	require.NoError(t, s.saveSessionState(context.Background(), state))
 
 	// Record shadow branch name and original BaseCommit
@@ -421,7 +421,7 @@ func TestPostCommit_LegacySession_NoTranscriptSize_Condenses(t *testing.T) {
 	// After condensation, CheckpointTranscriptSize should now be populated
 	state, err = s.loadSessionState(context.Background(), sessionID)
 	require.NoError(t, err)
-	assert.Greater(t, state.CheckpointTranscriptSize, int64(0),
+	assert.Positive(t, state.CheckpointTranscriptSize,
 		"CheckpointTranscriptSize should be populated after condensation (self-healing)")
 }
 
@@ -507,8 +507,8 @@ func TestPostCommit_EndedSession_FilesTouched_NoNewContent(t *testing.T) {
 	state.Phase = session.PhaseEnded
 	state.EndedAt = &now
 	state.FilesTouched = []string{"test.txt"}
-	state.CheckpointTranscriptStart = 2  // Transcript has exactly 2 lines
-	state.CheckpointTranscriptSize = 112 // Byte size of the 2-line transcript on shadow branch
+	state.CheckpointTranscriptStart = 2                                   // Transcript has exactly 2 lines
+	state.CheckpointTranscriptSize = shadowTranscriptSize(t, repo, state) // Match blob size on shadow branch
 	require.NoError(t, s.saveSessionState(context.Background(), state))
 
 	// Record shadow branch name, original BaseCommit, and StepCount
@@ -1407,6 +1407,23 @@ func setupSessionWithCheckpoint(t *testing.T, s *ManualCommitStrategy, _ *git.Re
 		AuthorEmail:    "test@test.com",
 	})
 	require.NoError(t, err, "SaveStep should succeed to create shadow branch content")
+}
+
+// shadowTranscriptSize returns the byte size of the transcript blob on the shadow branch.
+// Used in tests to set CheckpointTranscriptSize without hardcoding sizes.
+func shadowTranscriptSize(t *testing.T, repo *git.Repository, state *SessionState) int64 {
+	t.Helper()
+	shadowBranch := getShadowBranchNameForCommit(state.BaseCommit, state.WorktreeID)
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(shadowBranch), true)
+	require.NoError(t, err)
+	commit, err := repo.CommitObject(ref.Hash())
+	require.NoError(t, err)
+	tree, err := commit.Tree()
+	require.NoError(t, err)
+	metadataDir := paths.EntireMetadataDir + "/" + state.SessionID
+	size, err := tree.Size(metadataDir + "/" + paths.TranscriptFileName)
+	require.NoError(t, err)
+	return size
 }
 
 // commitWithCheckpointTrailer creates a commit on the current branch with the
