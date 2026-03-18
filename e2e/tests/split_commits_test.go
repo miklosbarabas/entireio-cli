@@ -85,7 +85,7 @@ func TestPartialStaging(t *testing.T) {
 			t.Fatalf("agent prompt 2 failed: %v", err)
 		}
 
-		s.Git(t, "add", "src/main.go")
+		s.Git(t, "add", "-A")
 		s.Git(t, "commit", "-m", "Add goodbye world")
 
 		testutil.WaitForCheckpointAdvanceFrom(t, s.Dir, cpBranch1, 15*time.Second)

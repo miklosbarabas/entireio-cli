@@ -38,7 +38,7 @@ With Entire, you can:
 
 - Git
 - macOS or Linux (Windows via WSL)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://opencode.ai/docs/cli/), [Cursor](https://www.cursor.com/), or [GitHub Copilot CLI](https://docs.github.com/en/copilot) installed and authenticated
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://opencode.ai/docs/cli/), [Cursor](https://www.cursor.com/), [Factory AI Droid](https://www.factory.ai/), or [GitHub Copilot CLI](https://docs.github.com/en/copilot) installed and authenticated
 
 ## Quick Start
 
@@ -65,13 +65,13 @@ entire status
 entire enable
 ```
 
-This installs agent and git hooks to work with your AI agent (Claude Code, Gemini CLI, OpenCode, Cursor, or Copilot CLI). You'll be prompted to select which agents to enable. To enable a specific agent non-interactively, use `entire enable --agent <name>` (e.g., `entire enable --agent cursor`).
+This installs agent and git hooks to work with your AI agent (Claude Code, Gemini CLI, OpenCode, Cursor, Factory AI Droid, or Copilot CLI). You'll be prompted to select which agents to enable. To enable a specific agent non-interactively, use `entire enable --agent <name>` (e.g., `entire enable --agent cursor`).
 
 The hooks capture session data as you work. Checkpoints are created when you or the agent make a git commit. Your code commits stay clean, Entire never creates commits on your active branch. All session metadata is stored on a separate `entire/checkpoints/v1` branch.
 
 ### 2. Work with Your AI Agent
 
-Just use Claude Code, Gemini CLI, OpenCode, Cursor, or Copilot CLI normally. Entire runs in the background, tracking your session:
+Just use Claude Code, Gemini CLI, OpenCode, Cursor, Factory AI Droid, or Copilot CLI normally. Entire runs in the background, tracking your session:
 
 ```
 entire status  # Check current session status anytime
@@ -208,7 +208,7 @@ go test -tags=integration ./cmd/entire/cli/integration_test -run TestLogin
 
 | Flag                   | Description                                                           |
 | ---------------------- | --------------------------------------------------------------------- |
-| `--agent <name>`       | AI agent to install hooks for: `claude-code`, `gemini`, `opencode`, `cursor`, or `copilot-cli` |
+| `--agent <name>`       | AI agent to install hooks for: `claude-code`, `gemini`, `opencode`, `cursor`, `factoryai-droid`, or `copilot-cli` |
 | `--force`, `-f`        | Force reinstall hooks (removes existing Entire hooks first)           |
 | `--local`              | Write settings to `settings.local.json` instead of `settings.json`    |
 | `--project`            | Write settings to `settings.json` even if it already exists           |
@@ -272,6 +272,7 @@ Each agent stores its hook configuration in its own directory. When you run `ent
 | Gemini CLI  | `.gemini/settings.json`       | JSON hooks config |
 | OpenCode    | `.opencode/plugins/entire.ts` | TypeScript plugin |
 | Cursor      | `.cursor/hooks.json`          | JSON hooks config |
+| Factory AI Droid | `.factory/settings.json` | JSON hooks config |
 | Copilot CLI | `.github/hooks/entire.json`   | JSON hooks config |
 
 You can enable multiple agents at the same time — each agent's hooks are independent. Entire detects which agents are active by checking for installed hooks, not by a setting in `settings.json`.
@@ -376,6 +377,22 @@ Or select Cursor IDE from the interactive agent picker when running `entire enab
 Rewind is not available at this time, but other commands (`doctor`, `status` etc.) work the same as all other agents.
 
 If you run into any issues with Cursor integration, please [open an issue](https://github.com/entireio/cli/issues).
+
+### Factory AI Droid
+
+Factory AI Droid support is currently in preview. Entire can work with [Factory AI Droid](https://www.factory.ai/) as an alternative to Claude Code, or alongside it — you can have multiple agents' hooks enabled at the same time.
+
+To enable:
+
+```bash
+entire enable --agent factoryai-droid
+```
+
+Or select Factory AI Droid from the interactive agent picker when running `entire enable`.
+
+All commands (`rewind`, `resume`, `status`, `doctor`, etc.) work the same regardless of which agent is configured.
+
+If you run into any issues with Factory AI Droid integration, please [open an issue](https://github.com/entireio/cli/issues).
 
 ### Copilot CLI
 
