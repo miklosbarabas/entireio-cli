@@ -302,7 +302,8 @@ func resolveLatestCheckpoint(ctx context.Context, checkpointIDs []id.CheckpointI
 // getMetadataTree returns the metadata branch tree and a fresh repo handle.
 // After a fetch, go-git's storer cache may be stale (new packfiles on disk
 // are invisible to the repo opened before the fetch). To avoid this, each
-// attempt opens a fresh repo after the fetch succeeds.
+// attempt opens a fresh repo after the fetch succeeds. Opening a repo is cheap
+// (reads .git/config + refs) so up to 4 opens is acceptable for correctness.
 //
 // Fallback order: treeless fetch → local → full fetch → remote tree.
 func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error) {
