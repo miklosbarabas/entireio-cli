@@ -53,30 +53,6 @@ func TestRequireSecureURL_RejectsHTTP(t *testing.T) {
 	}
 }
 
-func TestIsOverridden_False(t *testing.T) {
-	t.Setenv(BaseURLEnvVar, "")
-
-	if IsOverridden() {
-		t.Fatal("IsOverridden() = true, want false when env var is unset")
-	}
-}
-
-func TestIsOverridden_True(t *testing.T) {
-	t.Setenv(BaseURLEnvVar, "http://localhost:8787")
-
-	if !IsOverridden() {
-		t.Fatal("IsOverridden() = false, want true when env var is set")
-	}
-}
-
-func TestIsOverridden_WhitespaceOnly(t *testing.T) {
-	t.Setenv(BaseURLEnvVar, "   ")
-
-	if IsOverridden() {
-		t.Fatal("IsOverridden() = true, want false when env var is only whitespace")
-	}
-}
-
 func TestResolveURL(t *testing.T) {
 	t.Setenv(BaseURLEnvVar, "http://localhost:8787/")
 

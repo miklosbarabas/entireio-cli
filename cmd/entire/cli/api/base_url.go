@@ -9,7 +9,7 @@ import (
 )
 
 // ErrInsecureHTTP is returned when the base URL uses HTTP without an explicit opt-in.
-var ErrInsecureHTTP = errors.New("refusing to use insecure http:// base URL for authentication (set ENTIRE_API_BASE_URL to override)")
+var ErrInsecureHTTP = errors.New("refusing to use insecure http:// base URL for authentication (use --insecure-http-auth to override)")
 
 const (
 	// DefaultBaseURL is the production Entire API origin.
@@ -54,12 +54,8 @@ func ResolveURLFromBase(baseURL, path string) (string, error) {
 	return base.ResolveReference(rel).String(), nil
 }
 
-// IsOverridden reports whether the base URL has been explicitly set via ENTIRE_API_BASE_URL.
-func IsOverridden() bool {
-	return strings.TrimSpace(os.Getenv(BaseURLEnvVar)) != ""
-}
-
 // RequireSecureURL returns ErrInsecureHTTP if the base URL uses the http scheme.
+// Call this before making authenticated requests unless --insecure-http-auth is set.
 func RequireSecureURL(baseURL string) error {
 	u, err := url.Parse(baseURL)
 	if err != nil {
