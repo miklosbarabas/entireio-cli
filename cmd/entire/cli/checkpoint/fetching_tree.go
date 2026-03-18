@@ -3,6 +3,7 @@ package checkpoint
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 
@@ -183,4 +184,10 @@ func (t *FetchingTree) Files() *object.FileIter {
 // Both *object.Tree and *FetchingTree implement this interface.
 type FileReader interface {
 	File(path string) (*object.File, error)
+}
+
+// FileOpener provides access to a file's content reader.
+// *object.File implements this interface.
+type FileOpener interface {
+	Reader() (io.ReadCloser, error)
 }

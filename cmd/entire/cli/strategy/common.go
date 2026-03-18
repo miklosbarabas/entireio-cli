@@ -470,6 +470,46 @@ func ReadCheckpointMetadata(tree checkpoint.FileReader, checkpointPath string) (
 		return nil, fmt.Errorf("failed to find metadata at %s: %w", metadataPath, err)
 	}
 
+	// Session metadata paths in the summary are absolute (e.g., "/ca/b75de47439/0/metadata.json").
+	// For a full tree, strip the leading "/" to get tree-relative paths.
+	normalizePath := func(raw string) string {
+		return strings.TrimPrefix(raw, "/")
+	}
+	return decodeCheckpointInfo(file, tree, checkpointPath, normalizePath)
+}
+
+// ReadCheckpointMetadataFromSubtree reads checkpoint metadata from a tree that is
+// already rooted at the checkpoint directory (e.g., after tree.Tree(checkpointID.Path())).
+// checkpointPath is the original sharded path (e.g., "ca/b75de47439") and is used
+// to strip the prefix from absolute session metadata paths stored in the summary.
+func ReadCheckpointMetadataFromSubtree(tree checkpoint.FileReader, checkpointPath string) (*CheckpointInfo, error) {
+	file, err := tree.File(paths.MetadataFileName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find %s in checkpoint subtree: %w", paths.MetadataFileName, err)
+	}
+
+	// Session metadata paths are absolute from the tree root (e.g., "/ca/b75de47439/0/metadata.json").
+	// Strip the checkpoint prefix to get paths relative to the subtree (e.g., "0/metadata.json").
+	prefix := "/" + checkpointPath + "/"
+	normalizePath := func(raw string) string {
+		return strings.TrimPrefix(raw, prefix)
+	}
+	return decodeCheckpointInfo(file, tree, checkpointPath, normalizePath)
+}
+
+// decodeCheckpointInfo is the shared implementation for ReadCheckpointMetadata and
+// ReadCheckpointMetadataFromSubtree. It decodes the root metadata.json, reads
+// per-session metadata, and populates a CheckpointInfo.
+//
+// normalizePath transforms absolute session metadata paths from the summary into
+// paths that are valid for tree.File() lookups (the transform differs depending on
+// whether tree is a full metadata branch tree or a checkpoint subtree).
+func decodeCheckpointInfo(
+	file checkpoint.FileOpener,
+	tree checkpoint.FileReader,
+	checkpointPath string,
+	normalizePath func(string) string,
+) (*CheckpointInfo, error) {
 	reader, err := file.Reader()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
@@ -479,7 +519,6 @@ func ReadCheckpointMetadata(tree checkpoint.FileReader, checkpointPath string) (
 	// Try to parse as CheckpointSummary first (new format) using lite struct
 	var summary checkpointSummaryLite
 	if decodeErr := json.NewDecoder(reader).Decode(&summary); decodeErr == nil {
-		// If we have sessions array, this is the new format
 		if len(summary.Sessions) > 0 {
 			info := &CheckpointInfo{
 				CheckpointID:     summary.CheckpointID,
@@ -492,26 +531,20 @@ func ReadCheckpointMetadata(tree checkpoint.FileReader, checkpointPath string) (
 			var sessionIDs []string
 			for i, sessionPaths := range summary.Sessions {
 				if sessionPaths.Metadata == "" {
-					logging.Debug(context.Background(), "ReadCheckpointMetadata: session has empty metadata path",
-						slog.Int("session_index", i),
-						slog.String("checkpoint_path", checkpointPath),
-					)
 					continue
 				}
-				// SessionFilePaths contains absolute paths with leading "/"
-				// Strip the leading "/" for tree.File() which expects paths without leading slash
-				sessionMetadataPath := strings.TrimPrefix(sessionPaths.Metadata, "/")
+				sessionMetadataPath := normalizePath(sessionPaths.Metadata)
 				sessionMeta, sErr := decodeSessionMetadataLite(tree, sessionMetadataPath)
 				if sErr != nil {
-					logging.Debug(context.Background(), "ReadCheckpointMetadata: session metadata decode failed",
+					logging.Debug(context.Background(), "decodeCheckpointInfo: session metadata decode failed",
 						slog.Int("session_index", i),
 						slog.String("metadata_path", sessionMetadataPath),
+						slog.String("checkpoint_path", checkpointPath),
 						slog.String("error", sErr.Error()),
 					)
 					continue
 				}
 				sessionIDs = append(sessionIDs, sessionMeta.SessionID)
-				// Use first session for Agent, SessionID, CreatedAt, IsTask, ToolUseID
 				if i == 0 {
 					info.Agent = sessionMeta.Agent
 					info.SessionID = sessionMeta.SessionID
@@ -521,88 +554,12 @@ func ReadCheckpointMetadata(tree checkpoint.FileReader, checkpointPath string) (
 				}
 			}
 			info.SessionIDs = sessionIDs
-
 			return info, nil
 		}
 	}
 
 	// Fall back to parsing as CheckpointInfo (old format or direct info).
 	// Re-read the file since the decoder consumed the reader.
-	fallbackReader, err := file.Reader()
-	if err != nil {
-		return nil, fmt.Errorf("failed to re-read metadata: %w", err)
-	}
-	defer fallbackReader.Close()
-
-	var metadata CheckpointInfo
-	if err := json.NewDecoder(fallbackReader).Decode(&metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
-	}
-
-	return &metadata, nil
-}
-
-// ReadCheckpointMetadataFromSubtree reads checkpoint metadata from a tree that is
-// already rooted at the checkpoint directory (e.g., after tree.Tree(checkpointID.Path())).
-// checkpointPath is the original sharded path (e.g., "ca/b75de47439") and is used
-// to strip the prefix from absolute session metadata paths stored in the summary.
-func ReadCheckpointMetadataFromSubtree(tree checkpoint.FileReader, checkpointPath string) (*CheckpointInfo, error) {
-	// Tree is already at checkpoint level — read metadata.json directly
-	file, err := tree.File(paths.MetadataFileName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find %s in checkpoint subtree: %w", paths.MetadataFileName, err)
-	}
-
-	reader, err := file.Reader()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata: %w", err)
-	}
-	defer reader.Close()
-
-	var summary checkpointSummaryLite
-	if decodeErr := json.NewDecoder(reader).Decode(&summary); decodeErr == nil {
-		if len(summary.Sessions) > 0 {
-			info := &CheckpointInfo{
-				CheckpointID:     summary.CheckpointID,
-				CheckpointsCount: summary.CheckpointsCount,
-				FilesTouched:     summary.FilesTouched,
-				SessionCount:     len(summary.Sessions),
-			}
-
-			// Session metadata paths are stored as absolute from the tree root,
-			// e.g. "/ca/b75de47439/0/metadata.json". Strip the checkpoint prefix
-			// to get paths relative to the subtree, e.g. "0/metadata.json".
-			prefix := "/" + checkpointPath + "/"
-			var sessionIDs []string
-			for i, sessionPaths := range summary.Sessions {
-				if sessionPaths.Metadata == "" {
-					continue
-				}
-				sessionMetadataPath := strings.TrimPrefix(sessionPaths.Metadata, prefix)
-				sessionMeta, sErr := decodeSessionMetadataLite(tree, sessionMetadataPath)
-				if sErr != nil {
-					logging.Debug(context.Background(), "ReadCheckpointMetadataFromSubtree: session metadata decode failed",
-						slog.Int("session_index", i),
-						slog.String("metadata_path", sessionMetadataPath),
-						slog.String("error", sErr.Error()),
-					)
-					continue
-				}
-				sessionIDs = append(sessionIDs, sessionMeta.SessionID)
-				if i == 0 {
-					info.Agent = sessionMeta.Agent
-					info.SessionID = sessionMeta.SessionID
-					info.CreatedAt = sessionMeta.CreatedAt
-					info.IsTask = sessionMeta.IsTask
-					info.ToolUseID = sessionMeta.ToolUseID
-				}
-			}
-			info.SessionIDs = sessionIDs
-			return info, nil
-		}
-	}
-
-	// Fall back to parsing as CheckpointInfo (old format).
 	fallbackReader, err := file.Reader()
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-read metadata: %w", err)
