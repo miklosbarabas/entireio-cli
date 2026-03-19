@@ -740,18 +740,18 @@ func (s *GitStore) ReadCommitted(ctx context.Context, checkpointID id.Checkpoint
 		return nil, err //nolint:wrapcheck // Propagating context cancellation
 	}
 
-	tree, err := s.getSessionsBranchTree()
+	ft, err := s.getFetchingTree(ctx)
 	if err != nil {
 		return nil, nil //nolint:nilnil,nilerr // No sessions branch means no checkpoint exists
 	}
 
 	checkpointPath := checkpointID.Path()
-	checkpointTree, err := tree.Tree(checkpointPath)
+	checkpointTree, err := ft.Tree(checkpointPath)
 	if err != nil {
 		return nil, nil //nolint:nilnil,nilerr // Checkpoint directory not found
 	}
 
-	// Read root metadata.json as CheckpointSummary
+	// Read root metadata.json as CheckpointSummary (auto-fetches blob if needed)
 	metadataFile, err := checkpointTree.File(paths.MetadataFileName)
 	if err != nil {
 		return nil, nil //nolint:nilnil,nilerr // metadata.json not found
@@ -779,13 +779,13 @@ func (s *GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Check
 		return nil, err //nolint:wrapcheck // Propagating context cancellation
 	}
 
-	tree, err := s.getSessionsBranchTree()
+	ft, err := s.getFetchingTree(ctx)
 	if err != nil {
 		return nil, ErrCheckpointNotFound
 	}
 
 	checkpointPath := checkpointID.Path()
-	checkpointTree, err := tree.Tree(checkpointPath)
+	checkpointTree, err := ft.Tree(checkpointPath)
 	if err != nil {
 		return nil, ErrCheckpointNotFound
 	}
@@ -799,7 +799,7 @@ func (s *GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Check
 
 	result := &SessionContent{}
 
-	// Read session-specific metadata
+	// Read session-specific metadata (auto-fetches blob if needed)
 	var agentType types.AgentType
 	if metadataFile, fileErr := sessionTree.File(paths.MetadataFileName); fileErr == nil {
 		if content, contentErr := metadataFile.Contents(); contentErr == nil {
@@ -809,12 +809,12 @@ func (s *GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Check
 		}
 	}
 
-	// Read transcript
+	// Read transcript (auto-fetches blobs if needed)
 	if transcript, transcriptErr := readTranscriptFromTree(ctx, sessionTree, agentType); transcriptErr == nil && transcript != nil {
 		result.Transcript = transcript
 	}
 
-	// Read prompts
+	// Read prompts (auto-fetches blob if needed)
 	if file, fileErr := sessionTree.File(paths.PromptFileName); fileErr == nil {
 		if content, contentErr := file.Contents(); contentErr == nil {
 			result.Prompts = content
@@ -1295,6 +1295,17 @@ func (s *GitStore) ensureSessionsBranch() error {
 	return nil
 }
 
+// getFetchingTree returns a FetchingTree for the metadata branch.
+// If a blob fetcher is configured on the store, File() calls on the returned
+// tree will automatically fetch missing blobs from the remote.
+func (s *GitStore) getFetchingTree(ctx context.Context) (*FetchingTree, error) {
+	tree, err := s.getSessionsBranchTree()
+	if err != nil {
+		return nil, err
+	}
+	return NewFetchingTree(ctx, tree, s.repo.Storer, s.blobFetcher), nil
+}
+
 // getSessionsBranchTree returns the tree object for the entire/checkpoints/v1 branch.
 // Falls back to origin/entire/checkpoints/v1 if the local branch doesn't exist.
 func (s *GitStore) getSessionsBranchTree() (*object.Tree, error) {
@@ -1530,12 +1541,12 @@ func CreateCommit(repo *git.Repository, treeHash, parentHash plumbing.Hash, mess
 // readTranscriptFromTree reads a transcript from a git tree, handling both chunked and non-chunked formats.
 // It checks for chunk files first (.001, .002, etc.), then falls back to the base file.
 // The agentType is used for reassembling chunks in the correct format.
-func readTranscriptFromTree(ctx context.Context, tree *object.Tree, agentType types.AgentType) ([]byte, error) {
+func readTranscriptFromTree(ctx context.Context, tree *FetchingTree, agentType types.AgentType) ([]byte, error) {
 	// Collect all transcript-related files
 	var chunkFiles []string
 	var hasBaseFile bool
 
-	for _, entry := range tree.Entries {
+	for _, entry := range tree.RawEntries() {
 		if entry.Name == paths.TranscriptFileName || entry.Name == paths.TranscriptFileNameLegacy {
 			hasBaseFile = true
 		}

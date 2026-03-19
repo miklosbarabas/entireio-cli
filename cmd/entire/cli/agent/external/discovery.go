@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
@@ -15,15 +16,33 @@ import (
 
 const binaryPrefix = "entire-agent-"
 
+// discoveryTimeout caps the total time spent scanning $PATH for external agents.
+const discoveryTimeout = 10 * time.Second
+
 // DiscoverAndRegister scans $PATH for executables matching "entire-agent-<name>",
 // calls their "info" subcommand, and registers them in the agent registry.
 // Binaries whose name conflicts with an already-registered agent are skipped.
 // Errors during discovery are logged but do not prevent other agents from loading.
+// Discovery is skipped when the external_agents setting is not enabled.
 func DiscoverAndRegister(ctx context.Context) {
 	if !settings.IsExternalAgentsEnabled(ctx) {
 		logging.Debug(ctx, "external agent discovery disabled (external_agents not enabled in settings)")
 		return
 	}
+	discoverAndRegister(ctx)
+}
+
+// DiscoverAndRegisterAlways is like DiscoverAndRegister but bypasses the
+// external_agents settings check. Use this in interactive setup flows where
+// the user explicitly chooses agents.
+func DiscoverAndRegisterAlways(ctx context.Context) {
+	discoverAndRegister(ctx)
+}
+
+// discoverAndRegister contains the shared scanning logic for external agent discovery.
+func discoverAndRegister(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
 
 	pathEnv := os.Getenv("PATH")
 	if pathEnv == "" {
@@ -38,11 +57,21 @@ func DiscoverAndRegister(ctx context.Context) {
 
 	seen := make(map[string]bool) // deduplicate binaries across PATH dirs
 	for _, dir := range filepath.SplitList(pathEnv) {
+		if ctx.Err() != nil {
+			logging.Debug(ctx, "external agent discovery timed out")
+			return
+		}
+
 		matches, err := filepath.Glob(filepath.Join(dir, binaryPrefix+"*"))
 		if err != nil {
 			continue // skip unreadable directories
 		}
 		for _, binPath := range matches {
+			if ctx.Err() != nil {
+				logging.Debug(ctx, "external agent discovery timed out")
+				return
+			}
+
 			name := filepath.Base(binPath)
 			if seen[name] {
 				continue

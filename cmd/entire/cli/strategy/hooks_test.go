@@ -11,6 +11,18 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
 
+// clearGlobalHooksPath overrides any global core.hooksPath setting so that
+// test repos use their default .git/hooks directory. Setting the local value
+// takes precedence over the global one.
+func clearGlobalHooksPath(t *testing.T, repoDir string) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git", "config", "--local", "core.hooksPath", filepath.Join(repoDir, ".git", "hooks"))
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to set local core.hooksPath: %v", err)
+	}
+}
+
 // initHooksTestRepo creates a temporary git repository, changes to it, and clears
 // the repo root cache. Returns the repo directory path and the hooks directory path.
 func initHooksTestRepo(t *testing.T) (string, string) {
@@ -24,6 +36,7 @@ func initHooksTestRepo(t *testing.T) (string, string) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
+	clearGlobalHooksPath(t, tmpDir)
 	paths.ClearWorktreeRootCache()
 
 	return tmpDir, filepath.Join(tmpDir, ".git", "hooks")
@@ -82,6 +95,7 @@ func TestGetGitDirInPath_Worktree(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to init main repo: %v", err)
 	}
+	clearGlobalHooksPath(t, mainRepo)
 
 	// Configure git user for the commit
 	cmd = exec.CommandContext(ctx, "git", "config", "user.email", "test@test.com")
@@ -177,6 +191,7 @@ func TestGetHooksDirInPath_RegularRepo(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
+	clearGlobalHooksPath(t, tmpDir)
 
 	result, err := getHooksDirInPath(context.Background(), tmpDir)
 	if err != nil {
@@ -334,6 +349,7 @@ func initHooksWorktreeRepo(t *testing.T) (string, string) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to init main repo: %v", err)
 	}
+	clearGlobalHooksPath(t, mainRepo)
 
 	cmd = exec.CommandContext(ctx, "git", "config", "user.email", "test@test.com")
 	cmd.Dir = mainRepo

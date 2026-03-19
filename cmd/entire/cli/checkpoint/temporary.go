@@ -586,8 +586,10 @@ func (s *GitStore) GetTranscriptFromCommit(ctx context.Context, commitHash plumb
 	// Try to get the metadata subtree for chunk detection
 	subTree, subTreeErr := tree.Tree(metadataDir)
 	if subTreeErr == nil {
-		// Use the helper function that handles chunking
-		transcript, err := readTranscriptFromTree(ctx, subTree, agentType)
+		// Use the helper function that handles chunking.
+		// Wrap in FetchingTree with nil fetcher (temporary reads are always local).
+		ft := &FetchingTree{inner: subTree}
+		transcript, err := readTranscriptFromTree(ctx, ft, agentType)
 		if err == nil && transcript != nil {
 			return transcript, nil
 		}
@@ -895,6 +897,8 @@ func addDirectoryToEntriesWithAbsPath(repo *git.Repository, dirPathAbs, dirPathR
 
 		treePath := filepath.ToSlash(filepath.Join(dirPathRel, relWithinDir))
 
+		// Use redacted blob creation for metadata files (transcripts, prompts, etc.)
+		// to ensure PII and secrets are redacted before writing to git.
 		blobHash, mode, err := createRedactedBlobFromFile(repo, path, treePath)
 		if err != nil {
 			return fmt.Errorf("failed to create blob for %s: %w", path, err)

@@ -218,6 +218,9 @@ func (env *TestEnv) InitRepo() {
 	}
 	cfg.Raw.Section("commit").SetOption("gpgsign", "false")
 
+	// Override any global core.hooksPath so tests use the repo-local hooks directory.
+	cfg.Raw.Section("core").SetOption("hooksPath", filepath.Join(env.RepoDir, ".git", "hooks"))
+
 	if err := repo.SetConfig(cfg); err != nil {
 		env.T.Fatalf("failed to set repo config: %v", err)
 	}

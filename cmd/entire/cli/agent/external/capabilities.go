@@ -129,6 +129,12 @@ func (w *wrappedAgent) CalculateTotalTokenUsage(data []byte, offset int, dir str
 	return w.ea.CalculateTotalTokenUsage(data, offset, dir)
 }
 
+// IsExternal reports whether ag is backed by an external agent binary.
+func IsExternal(ag agent.Agent) bool {
+	_, ok := ag.(*wrappedAgent)
+	return ok
+}
+
 var (
 	_ agent.CapabilityDeclarer     = (*wrappedAgent)(nil)
 	_ agent.HookSupport            = (*wrappedAgent)(nil)

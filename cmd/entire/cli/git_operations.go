@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 
@@ -246,7 +249,9 @@ func findNewUntrackedFiles(current, preExisting []string) []string {
 }
 
 // BranchExistsOnRemote checks if a branch exists on the origin remote.
-// Returns true if the branch is tracked on origin, false otherwise.
+// First checks local remote-tracking refs, then queries the actual remote
+// via git ls-remote in case local refs are stale (e.g., after a fresh clone
+// that didn't fetch all branches).
 func BranchExistsOnRemote(ctx context.Context, branchName string) (bool, error) {
 	repo, err := openRepository(ctx)
 	if err != nil {
@@ -255,14 +260,25 @@ func BranchExistsOnRemote(ctx context.Context, branchName string) (bool, error) 
 
 	// Check for remote reference: refs/remotes/origin/<branchName>
 	_, err = repo.Reference(plumbing.NewRemoteReferenceName("origin", branchName), true)
-	if err != nil {
-		if errors.Is(err, plumbing.ErrReferenceNotFound) {
-			return false, nil
-		}
+	if err == nil {
+		return true, nil
+	}
+	if !errors.Is(err, plumbing.ErrReferenceNotFound) {
 		return false, fmt.Errorf("failed to check remote branch: %w", err)
 	}
 
-	return true, nil
+	// Local remote-tracking ref not found — query the actual remote.
+	lsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	lsCmd := exec.CommandContext(lsCtx, "git", "ls-remote", "--heads", "origin", "refs/heads/"+branchName)
+	output, lsErr := lsCmd.Output()
+	if lsErr != nil {
+		// ls-remote failed (no network, no remote, etc.) — treat as not found
+		return false, nil
+	}
+
+	return len(bytes.TrimSpace(output)) > 0, nil
 }
 
 // BranchExistsLocally checks if a local branch exists.
@@ -390,6 +406,85 @@ func FetchMetadataBranch(ctx context.Context) error {
 	localRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), remoteRef.Hash())
 	if err := repo.Storer.SetReference(localRef); err != nil {
 		return fmt.Errorf("failed to create local %s branch: %w", branchName, err)
+	}
+
+	return nil
+}
+
+// FetchMetadataTreeOnly fetches the tip of the entire/checkpoints/v1 branch
+// from origin with --depth=1 --filter=blob:none, downloading only the latest
+// commit and its tree objects (no blobs, no history).
+// After this call, tree navigation via go-git works but blob reads will fail
+// for objects that weren't previously fetched.
+// Uses git CLI for credential helper support.
+func FetchMetadataTreeOnly(ctx context.Context) error {
+	branchName := paths.MetadataBranchName
+
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	refSpec := fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branchName, branchName)
+
+	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "--depth=1", "--filter=blob:none", "origin", refSpec)
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return errors.New("treeless fetch timed out after 2 minutes")
+		}
+		return fmt.Errorf("failed to treeless-fetch %s from origin: %s: %w", branchName, strings.TrimSpace(string(output)), err)
+	}
+
+	repo, err := openRepository(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	// Get the remote branch reference
+	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branchName), true)
+	if err != nil {
+		return fmt.Errorf("branch '%s' not found on origin: %w", branchName, err)
+	}
+
+	// Create or update local branch pointing to the same commit
+	localRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), remoteRef.Hash())
+	if err := repo.Storer.SetReference(localRef); err != nil {
+		return fmt.Errorf("failed to create local %s branch: %w", branchName, err)
+	}
+
+	return nil
+}
+
+// FetchBlobsByHash fetches specific blob objects from the remote by their SHA-1 hashes.
+// Uses "git fetch origin <hash>" which goes through normal credential helpers,
+// unlike fetch-pack which bypasses them. Requires the server to support
+// uploadpack.allowReachableSHA1InWant (GitHub, GitLab, Bitbucket all do).
+//
+// If fetching by hash fails, falls back to a full metadata branch fetch.
+func FetchBlobsByHash(ctx context.Context, hashes []plumbing.Hash) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	// Build fetch args: "git fetch origin <hash1> <hash2> ..."
+	// This uses the normal transport + credential helpers, unlike fetch-pack.
+	args := []string{"fetch", "--no-write-fetch-head", "origin"}
+	for _, h := range hashes {
+		args = append(args, h.String())
+	}
+
+	fetchCmd := exec.CommandContext(ctx, "git", args...)
+	if _, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
+		logging.Debug(ctx, "fetch-by-hash failed, falling back to full metadata fetch",
+			slog.Int("blob_count", len(hashes)),
+			slog.String("error", fetchErr.Error()),
+		)
+		// Fallback: full metadata branch fetch (pack negotiation skips already-local objects)
+		if fallbackErr := FetchMetadataBranch(ctx); fallbackErr != nil {
+			return fmt.Errorf("fetch-by-hash failed: %w; fallback fetch also failed: %w",
+				fetchErr, fallbackErr)
+		}
 	}
 
 	return nil

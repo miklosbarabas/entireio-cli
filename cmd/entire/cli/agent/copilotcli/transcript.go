@@ -230,13 +230,15 @@ func extractModelFromEvents(events []copilotEvent) string {
 
 // sessionShutdownData is the data payload for session.shutdown events.
 // Contains aggregate model metrics for the entire session.
+// modelMetrics is a JSON object keyed by model name (e.g. "claude-sonnet-4.6"),
+// not an array — using map[string] here matches the real Copilot CLI wire format.
 type sessionShutdownData struct {
-	ModelMetrics []modelMetric `json:"modelMetrics"`
+	ModelMetrics map[string]modelMetric `json:"modelMetrics"`
 }
 
 // modelMetric contains per-model token usage aggregates.
+// The model name is the map key in sessionShutdownData.ModelMetrics, not a field.
 type modelMetric struct {
-	ModelID  string        `json:"modelId"`
 	Requests modelRequests `json:"requests"`
 	Usage    modelUsage    `json:"usage"`
 }
@@ -261,45 +263,52 @@ type assistantMessageTokenData struct {
 const eventTypeSessionShutdown = "session.shutdown"
 
 // CalculateTokenUsage computes token usage from the Copilot CLI JSONL transcript.
-// It prefers session.shutdown events (which contain session-wide aggregates) and
-// falls back to summing per-message outputTokens from assistant.message events.
+// For full transcripts (fromOffset == 0), it prefers session.shutdown, which
+// contains session-wide aggregates. For sliced transcripts, session.shutdown
+// would overcount because it is not checkpoint-scoped, so we fall back to
+// summing assistant.message outputTokens within the slice.
 func (c *CopilotCLIAgent) CalculateTokenUsage(transcriptData []byte, fromOffset int) (*agent.TokenUsage, error) {
 	events, err := parseEventsFromOffset(transcriptData, fromOffset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse transcript for token usage: %w", err)
 	}
 
-	return extractTokenUsageFromEvents(events), nil
+	return extractTokenUsageFromEvents(events, fromOffset == 0), nil
 }
 
 // extractTokenUsageFromEvents extracts token usage from parsed events.
-// Prefers session.shutdown aggregate; falls back to per-message outputTokens.
-func extractTokenUsageFromEvents(events []copilotEvent) *agent.TokenUsage {
-	// Try session.shutdown first — authoritative session-wide aggregate
-	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Type != eventTypeSessionShutdown {
-			continue
-		}
+// Prefers session.shutdown aggregate only when the caller is looking at the
+// full transcript; otherwise falls back to per-message outputTokens.
+func extractTokenUsageFromEvents(events []copilotEvent, preferSessionShutdown bool) *agent.TokenUsage {
+	if preferSessionShutdown {
+		// session.shutdown is authoritative, but only for full-session totals.
+		for i := len(events) - 1; i >= 0; i-- {
+			if events[i].Type != eventTypeSessionShutdown {
+				continue
+			}
 
-		var data sessionShutdownData
-		if err := json.Unmarshal(events[i].Data, &data); err != nil {
-			continue
-		}
+			var data sessionShutdownData
+			if err := json.Unmarshal(events[i].Data, &data); err != nil {
+				logging.Debug(context.Background(), "copilot-cli: session.shutdown data unmarshal failed",
+					"err", err)
+				continue
+			}
 
-		if len(data.ModelMetrics) == 0 {
-			continue
-		}
+			if len(data.ModelMetrics) == 0 {
+				continue
+			}
 
-		// Sum across all models
-		usage := &agent.TokenUsage{}
-		for _, m := range data.ModelMetrics {
-			usage.InputTokens += m.Usage.InputTokens
-			usage.OutputTokens += m.Usage.OutputTokens
-			usage.CacheReadTokens += m.Usage.CacheReadTokens
-			usage.CacheCreationTokens += m.Usage.CacheWriteTokens
-			usage.APICallCount += m.Requests.Count
+			// Sum across all models.
+			usage := &agent.TokenUsage{}
+			for _, m := range data.ModelMetrics {
+				usage.InputTokens += m.Usage.InputTokens
+				usage.OutputTokens += m.Usage.OutputTokens
+				usage.CacheReadTokens += m.Usage.CacheReadTokens
+				usage.CacheCreationTokens += m.Usage.CacheWriteTokens
+				usage.APICallCount += m.Requests.Count
+			}
+			return usage
 		}
-		return usage
 	}
 
 	// Fallback: sum outputTokens from assistant.message events

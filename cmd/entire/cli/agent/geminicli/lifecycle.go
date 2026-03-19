@@ -15,7 +15,20 @@ import (
 var (
 	_ agent.TranscriptAnalyzer = (*GeminiCLIAgent)(nil)
 	_ agent.TokenCalculator    = (*GeminiCLIAgent)(nil)
+	_ agent.HookResponseWriter = (*GeminiCLIAgent)(nil)
 )
+
+// WriteHookResponse outputs a JSON hook response to stdout.
+// Gemini CLI reads this JSON and displays the systemMessage to the user.
+func (g *GeminiCLIAgent) WriteHookResponse(message string) error {
+	resp := struct {
+		SystemMessage string `json:"systemMessage,omitempty"`
+	}{SystemMessage: message}
+	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
+		return fmt.Errorf("failed to encode hook response: %w", err)
+	}
+	return nil
+}
 
 // HookNames returns the hook verbs Gemini CLI supports.
 // These become subcommands: entire hooks gemini <verb>

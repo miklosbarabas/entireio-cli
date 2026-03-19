@@ -1,14 +1,17 @@
 package geminicli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
 
@@ -87,6 +90,11 @@ func (g *GeminiCLIAgent) InstallHooks(ctx context.Context, localDev bool, force 
 		rawHooks = make(map[string]json.RawMessage)
 	}
 
+	// Strip non-array values from hooks (removes legacy fields like "enabled": true
+	// that old Entire versions wrote directly into hooks, which Gemini CLI 0.33+
+	// rejects because hooks.additionalProperties requires arrays).
+	cleanupDone := stripNonArrayHookFields(ctx, rawHooks)
+
 	// Enable hooks via hooksConfig
 	// hooksConfig.Enabled must be true for Gemini CLI to execute hooks
 	hooksConfig.Enabled = true
@@ -115,13 +123,20 @@ func (g *GeminiCLIAgent) InstallHooks(ctx context.Context, localDev bool, force 
 	parseGeminiHookType(rawHooks, "PreCompress", &preCompress)
 	parseGeminiHookType(rawHooks, "Notification", &notification)
 
-	// Check for idempotency BEFORE removing hooks
-	// If the exact same hook command already exists, return 0 (no changes needed)
+	// Check for idempotency BEFORE removing hooks.
+	// If the exact same hook command already exists, hooks are already installed.
+	// When cleanupDone, we still need to write the file to persist the cleanup,
+	// but we return 0 (not 12) so callers know no hooks were added.
 	if !force {
 		existingCmd := getFirstEntireHookCommand(sessionStart)
 		expectedCmd := cmdPrefix + "session-start"
 		if existingCmd == expectedCmd {
-			return 0, nil // Already installed with same mode
+			if !cleanupDone {
+				return 0, nil // Already installed with same mode, nothing to write
+			}
+			// Cleanup needed but hooks already installed — write cleaned rawHooks
+			// without running the full remove+add cycle.
+			return 0, writeGeminiSettingsFile(rawSettings, rawHooks, hooksConfig, settingsPath)
 		}
 	}
 
@@ -190,35 +205,56 @@ func (g *GeminiCLIAgent) InstallHooks(ctx context.Context, localDev bool, force 
 	marshalGeminiHookType(rawHooks, "PreCompress", preCompress)
 	marshalGeminiHookType(rawHooks, "Notification", notification)
 
-	// Marshal hooksConfig back to raw settings
+	if err := writeGeminiSettingsFile(rawSettings, rawHooks, hooksConfig, settingsPath); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// stripNonArrayHookFields removes non-array values from rawHooks (e.g., legacy
+// "enabled": true that old Entire versions wrote directly into hooks, which
+// Gemini CLI 0.33+ rejects because hooks.additionalProperties requires arrays).
+// Returns true if any fields were removed.
+func stripNonArrayHookFields(ctx context.Context, rawHooks map[string]json.RawMessage) bool {
+	var cleaned bool
+	for key, val := range rawHooks {
+		trimmed := bytes.TrimSpace(val)
+		if len(trimmed) == 0 || trimmed[0] != '[' {
+			delete(rawHooks, key)
+			logging.Debug(ctx, "removed non-array field from hooks", slog.String("key", key))
+			cleaned = true
+		}
+	}
+	return cleaned
+}
+
+// writeGeminiSettingsFile marshals rawHooks and hooksConfig back into rawSettings and writes to disk.
+func writeGeminiSettingsFile(rawSettings map[string]json.RawMessage, rawHooks map[string]json.RawMessage, hooksConfig GeminiHooksConfig, settingsPath string) error {
 	hooksConfigJSON, err := json.Marshal(hooksConfig)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal hooksConfig: %w", err)
+		return fmt.Errorf("failed to marshal hooksConfig: %w", err)
 	}
 	rawSettings["hooksConfig"] = hooksConfigJSON
 
-	// Marshal hooks back to raw settings (preserving unknown hook types)
 	hooksJSON, err := json.Marshal(rawHooks)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal hooks: %w", err)
+		return fmt.Errorf("failed to marshal hooks: %w", err)
 	}
 	rawSettings["hooks"] = hooksJSON
 
-	// Write back to file
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o750); err != nil {
-		return 0, fmt.Errorf("failed to create .gemini directory: %w", err)
+		return fmt.Errorf("failed to create .gemini directory: %w", err)
 	}
 
 	output, err := json.MarshalIndent(rawSettings, "", "  ")
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal settings: %w", err)
+		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
 	if err := os.WriteFile(settingsPath, output, 0o600); err != nil {
-		return 0, fmt.Errorf("failed to write settings.json: %w", err)
+		return fmt.Errorf("failed to write settings.json: %w", err)
 	}
-
-	return count, nil
+	return nil
 }
 
 // parseGeminiHookType parses a specific hook type from rawHooks into the target slice.
@@ -272,6 +308,9 @@ func (g *GeminiCLIAgent) UninstallHooks(ctx context.Context) error {
 	if rawHooks == nil {
 		rawHooks = make(map[string]json.RawMessage)
 	}
+
+	// Strip non-array values from hooks (same migration as InstallHooks)
+	stripNonArrayHookFields(ctx, rawHooks)
 
 	// Parse only the hook types we need to modify
 	var sessionStart, sessionEnd, beforeAgent, afterAgent []GeminiHookMatcher

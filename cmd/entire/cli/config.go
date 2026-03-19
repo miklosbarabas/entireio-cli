@@ -62,9 +62,12 @@ func IsEnabled(ctx context.Context) (bool, error) {
 	return s.Enabled, nil
 }
 
-// GetStrategy returns the manual-commit strategy instance.
+// GetStrategy returns the manual-commit strategy instance with blob fetching
+// enabled so that checkpoint reads work after treeless fetches.
 func GetStrategy(_ context.Context) *strategy.ManualCommitStrategy {
-	return strategy.NewManualCommitStrategy()
+	s := strategy.NewManualCommitStrategy()
+	s.SetBlobFetcher(FetchBlobsByHash)
+	return s
 }
 
 // GetLogLevel returns the configured log level from settings.
