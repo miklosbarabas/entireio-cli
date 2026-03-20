@@ -18,9 +18,11 @@ fi
 
 claude \
   --plugin-dir .claude/plugins/e2e \
+  --output-format text \
   --allowedTools \
     "Read" \
     "Grep" \
     "Glob" \
   -p "$triage_args" \
-  2>&1 | tee "$TRIAGE_OUTPUT_FILE"
+  2>&1 | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\[[?][0-9]*[a-zA-Z]//g' \
+  | tee "$TRIAGE_OUTPUT_FILE"

@@ -247,7 +247,7 @@ jobs:
             echo "## E2E Triage: ${E2E_AGENT}"
             echo ""
             if [ -f "$TRIAGE_OUTPUT_FILE" ] && [ -s "$TRIAGE_OUTPUT_FILE" ]; then
-              cat "$TRIAGE_OUTPUT_FILE"
+              sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\[[?][0-9]*[a-zA-Z]//g' "$TRIAGE_OUTPUT_FILE"
             else
               echo "No triage output was produced."
               echo ""
