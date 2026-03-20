@@ -67,25 +67,34 @@ func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient
 	}
 
 	fmt.Fprintf(outW, "Device code: %s\n", start.UserCode)
-	approvalURL := start.VerificationURI
-	if approvalURL == "" {
-		approvalURL = start.VerificationURIComplete
+
+	// Use the clean URL (without code) for display, but open the complete URL
+	// (with code pre-filled) in the browser for a smoother experience.
+	displayURL := start.VerificationURI
+	browserURL := start.VerificationURIComplete
+	if browserURL == "" {
+		browserURL = displayURL
+	}
+	if displayURL == "" {
+		displayURL = browserURL
 	}
 
 	if canPromptInteractively() {
-		fmt.Fprintf(outW, "Press Enter to open %s in your browser...", approvalURL)
+		fmt.Fprintf(outW, "Press Enter to open %s in your browser...", displayURL)
 
 		// Read from /dev/tty so we get a real keypress and don't consume piped stdin.
-		waitForEnter()
+		if err := waitForEnter(ctx); err != nil {
+			return fmt.Errorf("wait for input: %w", err)
+		}
 
 		fmt.Fprintln(outW)
 
-		if err := openURL(ctx, approvalURL); err != nil {
+		if err := openURL(ctx, browserURL); err != nil {
 			fmt.Fprintf(errW, "Warning: failed to open browser: %v\n", err)
 			fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
 		}
 	} else {
-		fmt.Fprintf(outW, "Approval URL: %s\n", approvalURL)
+		fmt.Fprintf(outW, "Approval URL: %s\n", displayURL)
 	}
 
 	fmt.Fprintln(outW, "Waiting for approval...")
@@ -170,16 +179,28 @@ func waitForApproval(ctx context.Context, poller deviceAuthClient, deviceCode st
 
 // waitForEnter reads a line from /dev/tty, blocking until the user presses Enter.
 // If /dev/tty cannot be opened (e.g. on Windows), it returns immediately.
-func waitForEnter() {
+// Returns ctx.Err() if the context is cancelled before the user presses Enter.
+func waitForEnter(ctx context.Context) error {
 	tty, err := os.Open("/dev/tty")
 	if err != nil {
-		return
+		return nil
 	}
 	defer tty.Close()
 
-	reader := bufio.NewReader(tty)
-	if _, err = reader.ReadString('\n'); err != nil {
-		return
+	done := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(tty)
+		_, err := reader.ReadString('\n')
+		done <- err
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Close tty to unblock the reading goroutine.
+		_ = tty.Close()
+		return fmt.Errorf("interrupted: %w", ctx.Err())
+	case <-done:
+		return nil
 	}
 }
 
