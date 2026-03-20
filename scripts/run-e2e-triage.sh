@@ -8,6 +8,11 @@ set -euo pipefail
 
 mkdir -p "$(dirname "$TRIAGE_OUTPUT_FILE")"
 
+triage_args="/e2e:triage-ci ${RUN_URL} --agent ${E2E_AGENT}"
+if [ -n "${TRIAGE_SHA:-}" ]; then
+  triage_args="${triage_args} --sha ${TRIAGE_SHA}"
+fi
+
 claude --plugin-dir .claude/plugins/e2e \
-  -p "/e2e:triage-ci ${RUN_URL} --agent ${E2E_AGENT}" \
+  -p "$triage_args" \
   2>&1 | tee "$TRIAGE_OUTPUT_FILE"
