@@ -129,56 +129,31 @@ jobs:
               | (.name | (try capture("\\((?<agent>[^)]+)\\)").agent catch null))
               | select(. != null)
             ] | join(", ")')
-          failed_csv="${failed//, /,}"
           echo "agents=$failed" >> "$GITHUB_OUTPUT"
-          echo "agents_csv=$failed_csv" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack of E2E failure
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL: ${{ vars.E2E_SLACK_CHANNEL }}
-          FAILED_AGENTS: ${{ steps.failed.outputs.agents }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
-          COMMIT_SHA: ${{ github.sha }}
-          ACTOR: ${{ github.actor }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          text=":red_circle: *E2E Tests Failed* on \`main\`
-
-          Failed agents: *${FAILED_AGENTS}*
-          <${RUN_URL}|View run details>
-          Commit: <${COMMIT_URL}|${COMMIT_SHA}> by ${ACTOR}"
-
-          payload="$(jq -n \
-            --arg channel "$SLACK_CHANNEL" \
-            --arg text "$text" \
-            '{channel: $channel, text: $text}')"
-
-          response="$(curl -fsS https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-            -H 'Content-type: application/json; charset=utf-8' \
-            --data "$payload")"
-
-          if ! jq -e '.ok == true' >/dev/null <<<"$response"; then
-            echo "::error::Slack API returned non-ok response: $(jq -r '.error // "unknown"' <<<"$response")"
-            exit 1
-          fi
-
-          channel="$(jq -r '.channel' <<<"$response")"
-          thread_ts="$(jq -r '.ts' <<<"$response")"
-
-          triage_url="https://e2e-triage.entireio.workers.dev/triage?run_url=$(jq -rn --arg u "$RUN_URL" '$u | @uri')&slack_channel=${channel}&slack_thread_ts=${thread_ts}"
-
-          followup="$(jq -n \
-            --arg channel "$channel" \
-            --arg thread_ts "$thread_ts" \
-            --arg text ":mag: <${triage_url}|Run Triage>" \
-            '{channel: $channel, thread_ts: $thread_ts, text: $text}')"
-
-          curl -fsS https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-            -H 'Content-type: application/json; charset=utf-8' \
-            --data "$followup" > /dev/null
+        uses: slackapi/slack-github-action@91efab103c0de0a537f72a35f6b8cda0ee76bf0a # v2.1.1
+        with:
+          webhook: ${{ secrets.E2E_SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":red_circle: *E2E Tests Failed* on `main`\n\nFailed agents: *${{ steps.failed.outputs.agents }}*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run details>"
+                  }
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "Commit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}> by ${{ github.actor }}"
+                    }
+                  ]
+                }
+              ]
+            }
